@@ -7,7 +7,9 @@ export const getAvailableFaculty = (selectedDate: string) => {
   
   return facultyData.filter(f => {
     // Check if the current day is mentioned in their FID field
-    const isFID = f.fid.toLowerCase().includes(dayName.toLowerCase());
-    return !isFID;
+    // Support both single days and comma-separated days (e.g., "Tuesday, Saturday")
+    const fidDays = f.fid.toLowerCase().split(',').map(d => d.trim());
+    const isFID = fidDays.some(day => dayName.toLowerCase().includes(day) || day.includes(dayName.toLowerCase()));
+    return !isFID; // Return faculty who DON'T have FID on this day
   });
 };

@@ -1,26 +1,832 @@
 [
   {
     "id": "BENG-01",
-    "name": "Dr. Tapasi Bandyopadhyay",
+    "name": "Tapasi Bandyopadhyay",
     "designation": "Associate Professor",
     "department": "Bengali",
     "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Tapasi B",
     "dutyCount": 0
   },
   {
     "id": "BENG-02",
-    "name": "Dr. Uttara Ray",
+    "name": "Uttara Ray",
     "designation": "Associate Professor",
     "department": "Bengali",
     "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Uttara R",
+    "dutyCount": 0
+  },
+  {
+    "id": "BENG-03",
+    "name": "Srabani Pal",
+    "designation": "Associate Professor",
+    "department": "Bengali",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Srabani P",
+    "dutyCount": 0
+  },
+  {
+    "id": "BENG-04",
+    "name": "Ananya Das Gupta",
+    "designation": "SACT-I",
+    "department": "Bengali",
+    "fid": "Wednesday, Friday",
+    "unavailable": "",
+    "shortName": "Ananya G",
+    "dutyCount": 0
+  },
+  {
+    "id": "BENG-05",
+    "name": "Mitali Das (Roy)",
+    "designation": "SACT-I",
+    "department": "Bengali",
+    "fid": "Tuesday, Saturday",
+    "unavailable": "",
+    "shortName": "Mitali D",
+    "dutyCount": 0
+  },
+  {
+    "id": "BENG-06",
+    "name": "Sukriti Lahori Sinha",
+    "designation": "Associate Professor",
+    "department": "Bengali",
+    "fid": "Friday",
+    "unavailable": "",
+    "shortName": "Sukriti S",
+    "dutyCount": 0
+  },
+  {
+    "id": "BENG-07",
+    "name": "Jamilatul Ferdous",
+    "designation": "Associate Professor",
+    "department": "Bengali",
+    "fid": "Thursday",
+    "unavailable": "",
+    "shortName": "Jamilatul F",
+    "dutyCount": 0
+  },
+  {
+    "id": "BENG-08",
+    "name": "Aditi Chattopadhyay",
+    "designation": "Associate Professor",
+    "department": "Bengali",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Aditi C",
+    "dutyCount": 0
+  },
+  {
+    "id": "BOT-01",
+    "name": "Aditi Dey",
+    "designation": "SACT-II",
+    "department": "Botany",
+    "fid": "Thursday, Saturday",
+    "unavailable": "",
+    "shortName": "Aditi D",
+    "dutyCount": 0
+  },
+  {
+    "id": "BOT-02",
+    "name": "Anjan Hazra",
+    "designation": "Assistant Professor",
+    "department": "Botany",
+    "fid": "Tuesday",
+    "unavailable": "",
+    "shortName": "Anjan H",
+    "dutyCount": 0
+  },
+  {
+    "id": "BOT-03",
+    "name": "Payel Chatterjee",
+    "designation": "SACT-II",
+    "department": "Botany",
+    "fid": "Thursday, Saturday",
+    "unavailable": "",
+    "shortName": "Payel C",
+    "dutyCount": 0
+  },
+  {
+    "id": "BOT-04",
+    "name": "Rajendra Yonzone",
+    "designation": "Assistant Professor",
+    "department": "Botany",
+    "fid": "Friday",
+    "unavailable": "",
+    "shortName": "Rajendra Y",
+    "dutyCount": 0
+  },
+  {
+    "id": "BOT-05",
+    "name": "Sharmistha Basu",
+    "designation": "Assistant Professor",
+    "department": "Botany",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Sharmistha B",
+    "dutyCount": 0
+  },
+  {
+    "id": "BOT-06",
+    "name": "Sudip Kumar Sinha",
+    "designation": "Assistant Professor",
+    "department": "Botany",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Sudip S",
+    "dutyCount": 0
+  },
+  {
+    "id": "CHEM-01",
+    "name": "Anuva Samanta",
+    "designation": "Assistant Professor",
+    "department": "Chemistry",
+    "fid": "Friday",
+    "unavailable": "",
+    "shortName": "Anuva S",
+    "dutyCount": 0
+  },
+  {
+    "id": "CHEM-02",
+    "name": "Ishita Saha",
+    "designation": "Assistant Professor",
+    "department": "Chemistry",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Ishita S",
+    "dutyCount": 0
+  },
+  {
+    "id": "CHEM-03",
+    "name": "Priyabrata Roy",
+    "designation": "Assistant Professor",
+    "department": "Chemistry",
+    "fid": "Thursday",
+    "unavailable": "",
+    "shortName": "Priyabrata R",
+    "dutyCount": 0
+  },
+  {
+    "id": "CHEM-04",
+    "name": "Sharmila Bhattacharya",
+    "designation": "Associate Professor",
+    "department": "Chemistry",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Sharmila B",
+    "dutyCount": 0
+  },
+  {
+    "id": "CHEM-05",
+    "name": "Soumavo Ghosh",
+    "designation": "SACT-I",
+    "department": "Chemistry",
+    "fid": "Tuesday, Wednesday",
+    "unavailable": "",
+    "shortName": "Soumavo G",
+    "dutyCount": 0
+  },
+  {
+    "id": "COM-01",
+    "name": "Amit Kumar Das",
+    "designation": "SACT-I",
+    "department": "Commerce",
+    "fid": "Tuesday, Friday",
+    "unavailable": "",
+    "shortName": "Amit D",
+    "dutyCount": 0
+  },
+  {
+    "id": "COM-02",
+    "name": "Chhotelal Chouhan",
+    "designation": "Assistant Professor",
+    "department": "Commerce",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Chhotelal C",
+    "dutyCount": 0
+  },
+  {
+    "id": "COM-03",
+    "name": "Pritha Ghosh",
+    "designation": "SACT-II",
+    "department": "Commerce",
+    "fid": "Tuesday, Saturday",
+    "unavailable": "",
+    "shortName": "Pritha G",
+    "dutyCount": 0
+  },
+  {
+    "id": "COM-04",
+    "name": "Shubhasmita De",
+    "designation": "SACT-I",
+    "department": "Commerce",
+    "fid": "Thursday, Friday",
+    "unavailable": "",
+    "shortName": "Shubhasmita D",
+    "dutyCount": 0
+  },
+  {
+    "id": "ECON-01",
+    "name": "Ashish Moktan",
+    "designation": "Assistant Professor",
+    "department": "Economics",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Ashish M",
+    "dutyCount": 0
+  },
+  {
+    "id": "ECON-02",
+    "name": "Devleena Majumdar",
+    "designation": "Assistant Professor",
+    "department": "Economics",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Devleena M",
+    "dutyCount": 0
+  },
+  {
+    "id": "ECON-03",
+    "name": "Chitrita Bhowmick",
+    "designation": "Associate Professor",
+    "department": "Economics",
+    "fid": "Thursday",
+    "unavailable": "",
+    "shortName": "Chitrita B",
+    "dutyCount": 0
+  },
+  {
+    "id": "ECON-04",
+    "name": "Paramita Roy Biswas",
+    "designation": "Assistant Professor",
+    "department": "Economics",
+    "fid": "Thursday",
+    "unavailable": "",
+    "shortName": "Paramita B",
+    "dutyCount": 0
+  },
+  {
+    "id": "ENG-01",
+    "name": "Peter Minj",
+    "designation": "Assistant Professor",
+    "department": "English",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Peter M",
+    "dutyCount": 0
+  },
+  {
+    "id": "ENG-02",
+    "name": "Saroj Das",
+    "designation": "Assistant Professor",
+    "department": "English",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Saroj D",
+    "dutyCount": 0
+  },
+  {
+    "id": "ENG-03",
+    "name": "Sananda Laha",
+    "designation": "Assistant Professor",
+    "department": "English",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Sananda L",
+    "dutyCount": 0
+  },
+  {
+    "id": "ENG-04",
+    "name": "Madhumita Basu",
+    "designation": "Associate Professor",
+    "department": "English",
+    "fid": "Wednesday",
+    "unavailable": "",
+    "shortName": "Madhumita B",
+    "dutyCount": 0
+  },
+  {
+    "id": "ENG-05",
+    "name": "Anuradha Basu",
+    "designation": "Associate Professor",
+    "department": "English",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Anuradha B",
+    "dutyCount": 0
+  },
+  {
+    "id": "GEO-01",
+    "name": "Aloka Mukhopadhyay",
+    "designation": "Instructor",
+    "department": "Geography",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Aloka M",
+    "dutyCount": 0
+  },
+  {
+    "id": "GEO-02",
+    "name": "Prakriti Das",
+    "designation": "Assistant Professor",
+    "department": "Geography",
+    "fid": "Wednesday",
+    "unavailable": "",
+    "shortName": "Prakriti D",
+    "dutyCount": 0
+  },
+  {
+    "id": "GEO-03",
+    "name": "Pubali Ghosh",
+    "designation": "Associate Professor",
+    "department": "Geography",
+    "fid": "Tuesday",
+    "unavailable": "",
+    "shortName": "Pubali G",
+    "dutyCount": 0
+  },
+  {
+    "id": "GEO-04",
+    "name": "Raj Kumar Bhattacharya",
+    "designation": "Assistant Professor",
+    "department": "Geography",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Raj B",
+    "dutyCount": 0
+  },
+  {
+    "id": "GEO-05",
+    "name": "Saswati Nayak",
+    "designation": "Associate Professor",
+    "department": "Geography",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Saswati N",
+    "dutyCount": 0
+  },
+  {
+    "id": "HIST-01",
+    "name": "Nandini Ghosh",
+    "designation": "SACT-II",
+    "department": "History",
+    "fid": "Tuesday, Thursday",
+    "unavailable": "",
+    "shortName": "Nandini G",
+    "dutyCount": 0
+  },
+  {
+    "id": "HIST-02",
+    "name": "Dipanjana Sinha",
+    "designation": "Assistant Professor",
+    "department": "History",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Dipanjana S",
+    "dutyCount": 0
+  },
+  {
+    "id": "HIST-03",
+    "name": "Krishna Sarkar",
+    "designation": "Assistant Professor",
+    "department": "History",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Krishna S",
+    "dutyCount": 0
+  },
+  {
+    "id": "HIST-04",
+    "name": "Parnasabari Bhattacharyya",
+    "designation": "Associate Professor",
+    "department": "History",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Parnasabari B",
+    "dutyCount": 0
+  },
+  {
+    "id": "HIST-05",
+    "name": "Aditya Sarkar",
+    "designation": "Assistant Professor",
+    "department": "History",
+    "fid": "Tuesday",
+    "unavailable": "",
+    "shortName": "Aditya S",
+    "dutyCount": 0
+  },
+  {
+    "id": "HIST-06",
+    "name": "Jiaul Anam Molla",
+    "designation": "Assistant Professor",
+    "department": "History",
+    "fid": "Friday",
+    "unavailable": "",
+    "shortName": "Jiaul M",
+    "dutyCount": 0
+  },
+  {
+    "id": "HIST-07",
+    "name": "Suchandra Guha",
+    "designation": "Associate Professor",
+    "department": "History",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Suchandra G",
+    "dutyCount": 0
+  },
+  {
+    "id": "JOUR-01",
+    "name": "Sheelita Das",
+    "designation": "SACT-I",
+    "department": "Journalism and Mass Communication",
+    "fid": "Monday, Tuesday",
+    "unavailable": "",
+    "shortName": "Sheelita D",
+    "dutyCount": 0
+  },
+  {
+    "id": "JOUR-02",
+    "name": "Aditi Das",
+    "designation": "SACT-I",
+    "department": "Journalism and Mass Communication",
+    "fid": "Friday, Saturday",
+    "unavailable": "",
+    "shortName": "Aditi D",
+    "dutyCount": 0
+  },
+  {
+    "id": "MATH-01",
+    "name": "Dipanwita Paul Ghosh",
+    "designation": "Associate Professor",
+    "department": "Mathematics",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Dipanwita G",
+    "dutyCount": 0
+  },
+  {
+    "id": "MATH-02",
+    "name": "Anjana Bhattacharyya",
+    "designation": "Associate Professor",
+    "department": "Mathematics",
+    "fid": "Wednesday",
+    "unavailable": "",
+    "shortName": "Anjana B",
+    "dutyCount": 0
+  },
+  {
+    "id": "MATH-03",
+    "name": "Basudev Siddhya",
+    "designation": "Assistant Professor",
+    "department": "Mathematics",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Basudev S",
+    "dutyCount": 0
+  },
+  {
+    "id": "MATH-04",
+    "name": "Pramod Lama",
+    "designation": "Assistant Professor",
+    "department": "Mathematics",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Pramod L",
+    "dutyCount": 0
+  },
+  {
+    "id": "MATH-05",
+    "name": "Mainul Hossain",
+    "designation": "Assistant Professor",
+    "department": "Mathematics",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Mainul H",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHIL-01",
+    "name": "Saheli Basu",
+    "designation": "Associate Professor",
+    "department": "Philosophy",
+    "fid": "Thursday",
+    "unavailable": "",
+    "shortName": "Saheli B",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHIL-02",
+    "name": "Kasturi Datta",
+    "designation": "Associate Professor",
+    "department": "Philosophy",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Kasturi D",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHIL-03",
+    "name": "Indrani Mukherjee",
+    "designation": "Assistant Professor",
+    "department": "Philosophy",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Indrani M",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHIL-04",
+    "name": "Aditi Mistry",
+    "designation": "Assistant Professor",
+    "department": "Philosophy",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Aditi M",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHIL-05",
+    "name": "Arindam Malakar",
+    "designation": "SACT-II",
+    "department": "Philosophy",
+    "fid": "Friday, Saturday",
+    "unavailable": "",
+    "shortName": "Arindam M",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHIL-06",
+    "name": "Mina Chakraborty",
+    "designation": "Associate Professor",
+    "department": "Philosophy",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Mina C",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHIL-07",
+    "name": "Pinaki Sarkar",
+    "designation": "Assistant Professor",
+    "department": "Philosophy",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Pinaki S",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHY-01",
+    "name": "Gayatri Pal",
+    "designation": "Associate Professor",
+    "department": "Physics",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Gayatri P",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHY-02",
+    "name": "Shinjinee Das Gupta",
+    "designation": "Assistant Professor",
+    "department": "Physics",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Shinjinee G",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHY-03",
+    "name": "Subhendu Chandra",
+    "designation": "Associate Professor",
+    "department": "Physics",
+    "fid": "Friday",
+    "unavailable": "",
+    "shortName": "Subhendu C",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHY-04",
+    "name": "Atri Sarkar",
+    "designation": "Assistant Professor",
+    "department": "Physics",
+    "fid": "Thursday",
+    "unavailable": "",
+    "shortName": "Atri S",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHY-05",
+    "name": "Kathakali Biswas",
+    "designation": "SACT-I",
+    "department": "Physics",
+    "fid": "Wednesday, Thursday",
+    "unavailable": "",
+    "shortName": "Kathakali B",
+    "dutyCount": 0
+  },
+  {
+    "id": "PHY-06",
+    "name": "Swarnalekha Bandyopadhyay",
+    "designation": "Laboratory Instructor",
+    "department": "Physics",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Swarnalekha B",
+    "dutyCount": 0
+  },
+  {
+    "id": "POLS-01",
+    "name": "Arpita Mukherji",
+    "designation": "Associate Professor",
+    "department": "Political Science",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Arpita M",
+    "dutyCount": 0
+  },
+  {
+    "id": "POLS-02",
+    "name": "Mousumi Dasgupta",
+    "designation": "Assistant Professor",
+    "department": "Political Science",
+    "fid": "Saturday",
+    "unavailable": "",
+    "shortName": "Mousumi D",
+    "dutyCount": 0
+  },
+  {
+    "id": "POLS-03",
+    "name": "Suchhanda Ghosh",
+    "designation": "Assistant Professor",
+    "department": "Political Science",
+    "fid": "Wednesday",
+    "unavailable": "",
+    "shortName": "Suchhanda G",
+    "dutyCount": 0
+  },
+  {
+    "id": "POLS-04",
+    "name": "Joyeeta Dey",
+    "designation": "SACT-II",
+    "department": "Political Science",
+    "fid": "Thursday",
+    "unavailable": "",
+    "shortName": "Joyeeta D",
+    "dutyCount": 0
+  },
+  {
+    "id": "POLS-05",
+    "name": "Basari Halder",
+    "designation": "Assistant Professor",
+    "department": "Political Science",
+    "fid": "Tuesday",
+    "unavailable": "",
+    "shortName": "Basari H",
+    "dutyCount": 0
+  },
+  {
+    "id": "POLS-06",
+    "name": "Chandrani Barman",
+    "designation": "SACT-I",
+    "department": "Political Science",
+    "fid": "Tuesday, Saturday",
+    "unavailable": "",
+    "shortName": "Chandrani B",
+    "dutyCount": 0
+  },
+  {
+    "id": "POLS-07",
+    "name": "Nandan Saha",
+    "designation": "Assistant Professor",
+    "department": "Political Science",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Nandan S",
+    "dutyCount": 0
+  },
+  {
+    "id": "PSYC-01",
+    "name": "Sankalita Mukherjee",
+    "designation": "SACT-I",
+    "department": "Psychology",
+    "fid": "Wednesday, Thursday",
+    "unavailable": "",
+    "shortName": "Sankalita M",
+    "dutyCount": 0
+  },
+  {
+    "id": "PSYC-02",
+    "name": "Phooljani Ghosh",
+    "designation": "SACT-I",
+    "department": "Psychology",
+    "fid": "",
+    "unavailable": "",
+    "shortName": "Phooljani G",
+    "dutyCount": 0
+  },
+  {
+    "id": "SANS-01",
+    "name": "Suchismita Khanra",
+    "designation": "Assistant Professor",
+    "department": "Sanskrit",
+    "fid": "Wednesday",
+    "unavailable": "",
+    "shortName": "Suchismita K",
+    "dutyCount": 0
+  },
+  {
+    "id": "SANS-02",
+    "name": "Dipanwita Basu",
+    "designation": "SACT-I",
+    "department": "Sanskrit",
+    "fid": "Wednesday, Saturday",
+    "unavailable": "",
+    "shortName": "Dipanwita B",
+    "dutyCount": 0
+  },
+  {
+    "id": "SANS-03",
+    "name": "Bhupali Bhattacharya",
+    "designation": "SACT-I",
+    "department": "Sanskrit",
+    "fid": "Tuesday, Saturday",
+    "unavailable": "",
+    "shortName": "Bhupali B",
+    "dutyCount": 0
+  },
+  {
+    "id": "SANS-04",
+    "name": "Arijit Baidya",
+    "designation": "Assistant Professor",
+    "department": "Sanskrit",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Arijit B",
+    "dutyCount": 0
+  },
+  {
+    "id": "SANS-05",
+    "name": "Madhulina Das",
+    "designation": "Assistant Professor",
+    "department": "Sanskrit",
+    "fid": "Thursday",
+    "unavailable": "",
+    "shortName": "Madhulina D",
+    "dutyCount": 0
+  },
+  {
+    "id": "SANS-06",
+    "name": "Sulagna Pradhan",
+    "designation": "Assistant Professor",
+    "department": "Sanskrit",
+    "fid": "Thursday",
+    "unavailable": "",
+    "shortName": "Sulagna P",
+    "dutyCount": 0
+  },
+  {
+    "id": "URD-01",
+    "name": "Nikhat Jahan",
+    "designation": "SACT-I",
+    "department": "Urdu",
+    "fid": "Monday, Wednesday",
+    "unavailable": "",
+    "shortName": "Nikhat J",
+    "dutyCount": 0
+  },
+  {
+    "id": "URD-02",
+    "name": "Neeloofar Nabi",
+    "designation": "Contractual",
+    "department": "Urdu",
+    "fid": "Monday, Thursday, Saturday",
+    "unavailable": "",
+    "shortName": "Neeloofar N",
+    "dutyCount": 0
+  },
+  {
+    "id": "URD-03",
+    "name": "Farida Anwar",
+    "designation": "SACT-I",
+    "department": "Urdu",
+    "fid": "Thursday, Saturday",
+    "unavailable": "",
+    "shortName": "Farida A",
     "dutyCount": 0
   },
   {
     "id": "ZOO-01",
-    "name": "Dr. Sucharita Saha Datta",
+    "name": "Sucharita Saha Datta",
     "designation": "Associate Professor",
     "department": "Zoology",
     "fid": "Tuesday",
+    "unavailable": "",
+    "shortName": "Sucharita D",
     "dutyCount": 0
   },
   {
@@ -29,6 +835,28 @@
     "designation": "SACT-II",
     "department": "Zoology",
     "fid": "Tuesday, Saturday",
+    "unavailable": "",
+    "shortName": "Suchona C",
+    "dutyCount": 0
+  },
+  {
+    "id": "ZOO-03",
+    "name": "Sumallya Karmakar",
+    "designation": "Assistant Professor",
+    "department": "Zoology",
+    "fid": "Thursday",
+    "unavailable": "",
+    "shortName": "Sumallya K",
+    "dutyCount": 0
+  },
+  {
+    "id": "ZOO-04",
+    "name": "Debjani Das Ghosh",
+    "designation": "Associate Professor",
+    "department": "Zoology",
+    "fid": "Monday",
+    "unavailable": "",
+    "shortName": "Debjani G",
     "dutyCount": 0
   }
 ]
