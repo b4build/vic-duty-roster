@@ -4,20 +4,31 @@
     "name": "Dr. Tapasi Bandyopadhyay",
     "designation": "Associate Professor",
     "department": "Bengali",
-    "fid": "Monday"
+    "fid": "Monday",
+    "dutyCount": 0
   },
   {
     "id": "BENG-02",
     "name": "Dr. Uttara Ray",
     "designation": "Associate Professor",
     "department": "Bengali",
-    "fid": "Saturday"
+    "fid": "Saturday",
+    "dutyCount": 0
   },
   {
     "id": "ZOO-01",
     "name": "Dr. Sucharita Saha Datta",
     "designation": "Associate Professor",
     "department": "Zoology",
-    "fid": "Tuesday"
+    "fid": "Tuesday",
+    "dutyCount": 0
+  },
+  {
+    "id": "ZOO-02",
+    "name": "Suchona Mitra Chakraborty",
+    "designation": "SACT-II",
+    "department": "Zoology",
+    "fid": "Tuesday, Saturday",
+    "dutyCount": 0
   }
 ]
