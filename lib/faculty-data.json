@@ -1,0 +1,23 @@
+[
+  {
+    "id": "BENG-01",
+    "name": "Dr. Tapasi Bandyopadhyay",
+    "designation": "Associate Professor",
+    "department": "Bengali",
+    "fid": "Monday"
+  },
+  {
+    "id": "BENG-02",
+    "name": "Dr. Uttara Ray",
+    "designation": "Associate Professor",
+    "department": "Bengali",
+    "fid": "Saturday"
+  },
+  {
+    "id": "ZOO-01",
+    "name": "Dr. Sucharita Saha Datta",
+    "designation": "Associate Professor",
+    "department": "Zoology",
+    "fid": "Tuesday"
+  }
+]
