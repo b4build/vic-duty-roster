@@ -321,6 +321,9 @@ export default function DutyRoster() {
   const maxWeekdayCount = Math.max(...Array.from(weekdayDutyMap.values()), 1);
 
   const openSavedDate = (date: string) => {
+    // Always force-load the selected date, even if it's already selected.
+    loadDutyAssignment(date);
+    setAvailableFaculty(getAvailableFaculty(date));
     setSelectedDate(date);
     setViewMode('roster');
   };
