@@ -1151,7 +1151,10 @@ export default function DutyRoster() {
     try {
       if (!navigator.clipboard || !('write' in navigator.clipboard)) {
         await downloadPdf();
-        await navigator.clipboard?.writeText?.(`Duty chart downloaded: duty-chart-${selectedDate}.pdf`);
+        const clipboardAny = (navigator as any).clipboard;
+        if (clipboardAny && typeof clipboardAny.writeText === 'function') {
+          await clipboardAny.writeText(`Duty chart downloaded: duty-chart-${selectedDate}.pdf`);
+        }
         alert('Direct PDF clipboard is not supported. PDF downloaded instead.');
         return;
       }
@@ -1161,7 +1164,10 @@ export default function DutyRoster() {
       alert('PDF copied to clipboard.');
     } catch {
       await downloadPdf();
-      await navigator.clipboard?.writeText?.(`Duty chart downloaded: duty-chart-${selectedDate}.pdf`);
+      const clipboardAny = (navigator as any).clipboard;
+      if (clipboardAny && typeof clipboardAny.writeText === 'function') {
+        await clipboardAny.writeText(`Duty chart downloaded: duty-chart-${selectedDate}.pdf`);
+      }
       alert('PDF clipboard is limited in this browser. PDF downloaded instead.');
     }
   };
