@@ -1,13 +1,15 @@
 "use client";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, Users, Printer, Trash2, Plus, Search, Filter, X, ChevronDown, Clock, Building2, UserCircle2, AlertCircle, ClipboardList, DoorOpen, UserCheck, GripVertical, History } from 'lucide-react';
+import { Calendar, Users, Printer, Trash2, Plus, Search, Filter, X, ChevronDown, Clock, Building2, UserCircle2, AlertCircle, ClipboardList, DoorOpen, UserCheck, GripVertical, History, LayoutDashboard, TrendingUp } from 'lucide-react';
 import { getAvailableFaculty } from '@/lib/roster-utils';
 import facultyData from '@/lib/faculty-data.json';
 import { Faculty, Room, InvigilatorSlot, DragItem, DutyAssignment, ShiftData } from '@/lib/types';
-import { saveDutyAssignment, getDutyAssignmentByDate, updateDutyCounts, initializeFacultyData, getAllFaculty, getDutyHistoryByFaculty, getAllDutyAssignments, getAllDutyHistory, resetDutyCountsForDate, resetAllDutyCounts, exportBackupData, importBackupData } from '@/lib/db-utils';
+import { saveDutyAssignment, getDutyAssignmentByDate, updateDutyCounts, initializeFacultyData, getAllFaculty, getDutyHistoryByFaculty, getAllDutyAssignments, getAllDutyHistory, resetDutyCountsForDate, resetAllDutyCounts, exportBackupData, importBackupData, deleteDutyAssignment, clearAllDutyAssignments } from '@/lib/db-utils';
 
-type ViewMode = 'roster' | 'directory';
+type ViewMode = 'roster' | 'directory' | 'dashboard';
+type FacultySortBy = 'name' | 'department' | 'designation' | 'dutyCount' | 'fid';
+type SortOrder = 'asc' | 'desc';
 
 export default function DutyRoster() {
   const router = useRouter();
@@ -17,6 +19,8 @@ export default function DutyRoster() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
   const [selectedFaculty, setSelectedFaculty] = useState<Faculty | null>(null);
+  const [directorySortBy, setDirectorySortBy] = useState<FacultySortBy>('name');
+  const [directorySortOrder, setDirectorySortOrder] = useState<SortOrder>('asc');
   
   // Roster states
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -28,6 +32,9 @@ export default function DutyRoster() {
   const [exportTo, setExportTo] = useState(new Date().toISOString().split('T')[0]);
   const [dataVersion, setDataVersion] = useState(0);
   const [theme, setTheme] = useState('light');
+  const [availableSortBy, setAvailableSortBy] = useState<FacultySortBy>('name');
+  const [availableSortOrder, setAvailableSortOrder] = useState<SortOrder>('asc');
+  const [isCompactScreen, setIsCompactScreen] = useState(false);
   const allFaculty = useMemo(() => getAllFaculty(), [dataVersion]);
   const printRef = useRef<HTMLDivElement | null>(null);
   
@@ -76,6 +83,15 @@ export default function DutyRoster() {
       localStorage.setItem('vic_theme', theme);
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const media = window.matchMedia('(max-width: 1023px), (pointer: coarse)');
+    const apply = () => setIsCompactScreen(media.matches);
+    apply();
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, []);
 
   const normalizeRooms = (rooms: Room[]) => {
     let changed = false;
@@ -162,6 +178,29 @@ export default function DutyRoster() {
     return matchesSearch && matchesDepartment;
   });
 
+  const sortFacultyList = (
+    list: Faculty[],
+    sortBy: FacultySortBy,
+    sortOrder: SortOrder
+  ): Faculty[] => {
+    const direction = sortOrder === 'asc' ? 1 : -1;
+    const byText = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+    const byNumber = (a: number, b: number) => a - b;
+
+    return [...list].sort((a, b) => {
+      let result = 0;
+      if (sortBy === 'name') result = byText(a.name, b.name);
+      if (sortBy === 'department') result = byText(a.department || '', b.department || '');
+      if (sortBy === 'designation') result = byText(a.designation || '', b.designation || '');
+      if (sortBy === 'fid') result = byText(a.fid || '', b.fid || '');
+      if (sortBy === 'dutyCount') result = byNumber(a.dutyCount || 0, b.dutyCount || 0);
+      if (result === 0) result = byText(a.name, b.name);
+      return result * direction;
+    });
+  };
+
+  const sortedDirectoryFaculty = sortFacultyList(filteredFaculty, directorySortBy, directorySortOrder);
+
   // Get all assigned faculty names
   const getAllAssignedFaculty = (shift: 1 | 2): Set<string> => {
     const rooms = shift === 1 ? rooms1 : rooms2;
@@ -190,7 +229,7 @@ export default function DutyRoster() {
   const eligibleFaculty = allowRepeatDuty
     ? availableFacultyWithCounts
     : availableFacultyWithCounts.filter(f => !assignedToday.has(f.name));
-  const sortedEligibleFaculty = [...eligibleFaculty].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedEligibleFaculty = sortFacultyList(eligibleFaculty, availableSortBy, availableSortOrder);
 
   const availForSuper1 = super1
     ? [
@@ -204,6 +243,22 @@ export default function DutyRoster() {
         ...availableFacultyWithCounts.filter(f => f.name === super2)
       ].filter((f, i, arr) => arr.findIndex(x => x.id === f.id) === i)
     : sortedEligibleFaculty;
+
+  const buildSlotFacultyOptions = (shift: 1 | 2) => {
+    const rooms = shift === 1 ? rooms1 : rooms2;
+    const assignedInShift = new Set<string>();
+    rooms.forEach(room => room.slots.forEach(slot => {
+      if (slot.facultyName) assignedInShift.add(slot.facultyName);
+    }));
+
+    return [
+      ...sortedEligibleFaculty,
+      ...availableFacultyWithCounts.filter(f => assignedInShift.has(f.name))
+    ].filter((f, i, arr) => arr.findIndex(x => x.id === f.id) === i);
+  };
+
+  const slotOptions1 = buildSlotFacultyOptions(1);
+  const slotOptions2 = buildSlotFacultyOptions(2);
 
   const canGenerate = 
     (shiftMode !== 'afternoon' ? super1 && rooms1.every(r => r.slots.every(s => s.facultyName)) : true) &&
@@ -225,6 +280,62 @@ export default function DutyRoster() {
 
   const summary1 = summarizeShift(rooms1, super1);
   const summary2 = summarizeShift(rooms2, super2);
+
+  const allAssignments = useMemo(() => getAllDutyAssignments(), [dataVersion]);
+  const allHistory = useMemo(() => getAllDutyHistory(), [dataVersion]);
+
+  const countAssignmentSlots = (assignment: DutyAssignment) => {
+    const countShift = (shift?: ShiftData) => {
+      if (!shift) return { total: 0, filled: 0 };
+      const total = shift.rooms.reduce((sum, r) => sum + r.slots.length, 0);
+      const filled = shift.rooms.reduce((sum, r) => sum + r.slots.filter(s => s.facultyName).length, 0);
+      return { total, filled };
+    };
+
+    const s1 = assignment.shiftMode !== 'afternoon' ? countShift(assignment.shift1) : { total: 0, filled: 0 };
+    const s2 = assignment.shiftMode !== 'forenoon' ? countShift(assignment.shift2) : { total: 0, filled: 0 };
+    return { total: s1.total + s2.total, filled: s1.filled + s2.filled };
+  };
+
+  const savedAssignments = [...allAssignments].sort((a, b) => b.date.localeCompare(a.date));
+  const assignedFacultyIds = new Set(allHistory.map(h => h.facultyId));
+  const facultyByLoad = [...allFaculty].sort((a, b) => (b.dutyCount || 0) - (a.dutyCount || 0));
+  const topFacultyLoad = facultyByLoad.slice(0, 8);
+  const maxDutyCount = topFacultyLoad[0]?.dutyCount || 1;
+  const maxOverallDuty = facultyByLoad[0]?.dutyCount || 0;
+  const minOverallDuty = facultyByLoad[facultyByLoad.length - 1]?.dutyCount || 0;
+  const balanceIndex = maxOverallDuty === 0
+    ? 100
+    : Math.max(0, Math.round(100 - ((maxOverallDuty - minOverallDuty) / maxOverallDuty) * 100));
+
+  const weekdayDutyMap = (() => {
+    const map = new Map<string, number>([
+      ['Mon', 0], ['Tue', 0], ['Wed', 0], ['Thu', 0], ['Fri', 0], ['Sat', 0], ['Sun', 0]
+    ]);
+    allHistory.forEach(item => {
+      const day = new Date(item.date).toLocaleDateString('en-US', { weekday: 'short' });
+      map.set(day, (map.get(day) || 0) + 1);
+    });
+    return map;
+  })();
+  const maxWeekdayCount = Math.max(...Array.from(weekdayDutyMap.values()), 1);
+
+  const openSavedDate = (date: string) => {
+    setSelectedDate(date);
+    setViewMode('roster');
+  };
+
+  const resetSavedDate = (date: string) => {
+    const ok = window.confirm(`Reset saved duty and duty counts for ${date}? This cannot be undone.`);
+    if (!ok) return;
+    resetDutyCountsForDate(date);
+    deleteDutyAssignment(date);
+    if (selectedDate === date) {
+      loadDutyAssignment(date);
+      setAvailableFaculty(getAvailableFaculty(date));
+    }
+    setDataVersion(v => v + 1);
+  };
 
   const addRoom = (shift: 1 | 2) => {
     const newRoom: Room = { 
@@ -364,21 +475,25 @@ export default function DutyRoster() {
     setSuper2(nextSuper2);
   }, [allowRepeatDuty]);
 
-  const handleDropOnSlot = (shift: 1 | 2, roomId: number, slotId: string) => {
-    if (!draggedItem) return;
-    if (!draggedItem.facultyName) return;
+  const applyFacultyToSlot = (
+    shift: 1 | 2,
+    roomId: number,
+    slotId: string,
+    item: DragItem
+  ) => {
+    if (!item.facultyName) return;
 
-    const facultyName = draggedItem.facultyName;
+    const facultyName = item.facultyName;
     let nextRooms1 = rooms1;
     let nextRooms2 = rooms2;
     let nextSuper1 = super1;
     let nextSuper2 = super2;
 
-    // Remove from source slot if dragging an assigned faculty (move behavior)
-    if (draggedItem.sourceShift === 1) {
-      nextRooms1 = clearSlotById(nextRooms1, draggedItem.sourceRoomId, draggedItem.sourceSlotId);
-    } else if (draggedItem.sourceShift === 2) {
-      nextRooms2 = clearSlotById(nextRooms2, draggedItem.sourceRoomId, draggedItem.sourceSlotId);
+    // Remove from source slot if moving an already assigned faculty.
+    if (item.sourceShift === 1) {
+      nextRooms1 = clearSlotById(nextRooms1, item.sourceRoomId, item.sourceSlotId);
+    } else if (item.sourceShift === 2) {
+      nextRooms2 = clearSlotById(nextRooms2, item.sourceRoomId, item.sourceSlotId);
     }
 
     // Enforce single assignment per shift (also prevent supervisor+slot duplicates)
@@ -426,7 +541,20 @@ export default function DutyRoster() {
     setSuper1(nextSuper1);
     setRooms2(nextRooms2);
     setSuper2(nextSuper2);
+  };
+
+  const handleDropOnSlot = (shift: 1 | 2, roomId: number, slotId: string) => {
+    if (!draggedItem || !draggedItem.facultyName) return;
+    applyFacultyToSlot(shift, roomId, slotId, draggedItem);
     setDraggedItem(null);
+  };
+
+  const handleSelectSlotFaculty = (shift: 1 | 2, roomId: number, slotId: string, facultyName: string) => {
+    if (!facultyName) {
+      removeFromSlot(shift, roomId, slotId);
+      return;
+    }
+    applyFacultyToSlot(shift, roomId, slotId, { type: 'faculty', facultyName });
   };
 
   const handleSupervisorChange = (shift: 1 | 2, value: string) => {
@@ -493,17 +621,19 @@ export default function DutyRoster() {
     setRooms(updatedRooms);
   };
 
-  const handleSaveAndGenerate = () => {
+  const buildAssignment = (): DutyAssignment => {
+    const existing = getDutyAssignmentByDate(selectedDate);
+    const now = new Date().toISOString();
     const assignment: DutyAssignment = {
-      id: `duty-${selectedDate}`,
+      id: existing?.id || `duty-${selectedDate}`,
       date: selectedDate,
       course,
       semester,
       year,
       curriculum,
       shiftMode,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
     };
 
     if (shiftMode !== 'afternoon') {
@@ -522,9 +652,22 @@ export default function DutyRoster() {
       };
     }
 
+    return assignment;
+  };
+
+  const saveCurrentAssignment = () => {
+    const assignment = buildAssignment();
     saveDutyAssignment(assignment);
     updateDutyCounts(assignment);
     setDataVersion(v => v + 1);
+  };
+
+  const handlePreviewAndPrint = () => {
+    setIsPrintMode(true);
+  };
+
+  const handleSaveAndPrint = () => {
+    saveCurrentAssignment();
     setIsPrintMode(true);
   };
 
@@ -600,16 +743,22 @@ export default function DutyRoster() {
   };
 
   const handleResetDate = () => {
-    const ok = window.confirm(`Reset duty counts for ${selectedDate}? This cannot be undone.`);
+    const ok = window.confirm(`Reset saved duty and duty counts for ${selectedDate}? This cannot be undone.`);
     if (!ok) return;
     resetDutyCountsForDate(selectedDate);
+    deleteDutyAssignment(selectedDate);
+    loadDutyAssignment(selectedDate);
+    setAvailableFaculty(getAvailableFaculty(selectedDate));
     setDataVersion(v => v + 1);
   };
 
   const handleResetAll = () => {
-    const ok = window.confirm('Reset ALL duty counts? This cannot be undone.');
+    const ok = window.confirm('Reset ALL saved duty rosters and duty counts? This cannot be undone.');
     if (!ok) return;
     resetAllDutyCounts();
+    clearAllDutyAssignments();
+    loadDutyAssignment(selectedDate);
+    setAvailableFaculty(getAvailableFaculty(selectedDate));
     setDataVersion(v => v + 1);
   };
 
@@ -628,8 +777,10 @@ export default function DutyRoster() {
 <style>
   @page { size: A4; margin: 20mm; }
   body { font-family: "Times New Roman", Times, serif; color: #000; }
-  table { width: 100%; border-collapse: collapse; }
+  table { width: 88%; margin: 0 auto 10px; border-collapse: collapse; table-layout: fixed; }
   th, td { border: 1px solid #000; padding: 6px; text-align: left; }
+  th:first-child, td:first-child { width: 26%; }
+  td:last-child, th:last-child { word-break: break-word; white-space: normal; }
 </style>
 </head>
 <body>${content}</body>
@@ -652,7 +803,12 @@ export default function DutyRoster() {
       import('jspdf')
     ]);
     const element = printRef.current;
-    const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff' });
+    const canvas = await html2canvas(element, {
+      scale: 2,
+      backgroundColor: '#ffffff',
+      useCORS: true,
+      windowWidth: element.scrollWidth
+    });
     const imgData = canvas.toDataURL('image/png');
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pageWidth = pdf.internal.pageSize.getWidth();
@@ -713,8 +869,8 @@ export default function DutyRoster() {
     const allocation2 = allocateInvigilators(rooms2);
     
     return (
-      <div className="min-h-screen bg-white p-8">
-        <div className="print:hidden mb-8 flex gap-4 items-center">
+      <div className="min-h-screen bg-white p-3 sm:p-6 md:p-8">
+        <div className="print:hidden mb-6 flex flex-wrap gap-3 items-center">
           <button 
             onClick={() => setIsPrintMode(false)} 
             className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium transition-colors"
@@ -743,7 +899,7 @@ export default function DutyRoster() {
 
         <div
           ref={printRef}
-          className="max-w-4xl mx-auto p-8 bg-white"
+          className="max-w-[760px] mx-auto p-4 sm:p-6 bg-white"
           style={{ fontFamily: '"Times New Roman", Times, serif' }}
         >
 
@@ -760,10 +916,10 @@ export default function DutyRoster() {
                 <p className="text-base font-semibold">Super: {super1 ? toShortName(super1) : '—'}</p>
               </div>
               
-              <table className="w-full border-collapse border border-black">
+              <table className="w-[88%] mx-auto border-collapse border border-black table-fixed text-[15px]">
                 <thead>
                   <tr>
-                    <th className="border border-black p-2 font-semibold text-left w-36">Room No</th>
+                    <th className="border border-black p-2 font-semibold text-left w-32">Room No</th>
                     <th className="border border-black p-2 font-semibold text-left">Invigilators</th>
                   </tr>
                 </thead>
@@ -773,7 +929,7 @@ export default function DutyRoster() {
                       <td className="border border-black p-2">
                         {room.roomNo}{room.students ? ` (${room.students})` : ''}
                       </td>
-                      <td className="border border-black p-2">
+                      <td className="border border-black p-2 break-words whitespace-normal">
                         {room.assignedInvigilators.map(toShortName).join(', ') || '—'}
                       </td>
                     </tr>
@@ -796,10 +952,10 @@ export default function DutyRoster() {
                 <p className="text-base font-semibold">Super: {super2 ? toShortName(super2) : '—'}</p>
               </div>
               
-              <table className="w-full border-collapse border border-black">
+              <table className="w-[88%] mx-auto border-collapse border border-black table-fixed text-[15px]">
                 <thead>
                   <tr>
-                    <th className="border border-black p-2 font-semibold text-left w-36">Room No</th>
+                    <th className="border border-black p-2 font-semibold text-left w-32">Room No</th>
                     <th className="border border-black p-2 font-semibold text-left">Invigilators</th>
                   </tr>
                 </thead>
@@ -809,7 +965,7 @@ export default function DutyRoster() {
                       <td className="border border-black p-2">
                         {room.roomNo}{room.students ? ` (${room.students})` : ''}
                       </td>
-                      <td className="border border-black p-2">
+                      <td className="border border-black p-2 break-words whitespace-normal">
                         {room.assignedInvigilators.map(toShortName).join(', ') || '—'}
                       </td>
                     </tr>
@@ -831,16 +987,23 @@ export default function DutyRoster() {
     );
   }
 
-  // Faculty Directory View
-  if (viewMode === 'directory') {
+  // Dashboard View
+  if (viewMode === 'dashboard') {
     return (
       <div className="min-h-screen theme-root" data-theme={theme}>
         <header className="theme-header border-b sticky top-0 z-50 shadow-sm">
-          <div className="max-w-7xl mx-auto px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-8">
-                <h1 className="text-2xl font-bold text-slate-900">VIC Duty Roster</h1>
-                <nav className="flex gap-1">
+          <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-8 w-full md:w-auto">
+                <h1 className="text-xl sm:text-2xl font-bold text-slate-900">VIC Duty Roster</h1>
+                <nav className="flex flex-wrap gap-1">
+                  <button
+                    onClick={() => setViewMode('dashboard')}
+                    className="px-4 py-2 rounded-lg bg-blue-100 text-blue-700 font-medium flex items-center gap-2"
+                  >
+                    <LayoutDashboard size={18} />
+                    Dashboard
+                  </button>
                   <button
                     onClick={() => setViewMode('roster')}
                     className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
@@ -850,14 +1013,14 @@ export default function DutyRoster() {
                   </button>
                   <button
                     onClick={() => setViewMode('directory')}
-                    className="px-4 py-2 rounded-lg bg-blue-100 text-blue-700 font-medium flex items-center gap-2"
+                    className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
                   >
                     <Users size={18} />
                     Faculty Directory
                   </button>
                 </nav>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 w-full md:w-auto">
                 <select
                   value={theme}
                   onChange={(e) => setTheme(e.target.value)}
@@ -879,7 +1042,280 @@ export default function DutyRoster() {
           </div>
         </header>
 
-        <div className="max-w-7xl mx-auto px-6 py-8">
+          <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-8 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="theme-card rounded-xl p-5">
+              <div className="text-sm text-slate-600">Saved Duty Dates</div>
+              <div className="text-3xl font-bold text-slate-900 mt-1">{savedAssignments.length}</div>
+            </div>
+            <div className="theme-card rounded-xl p-5">
+              <div className="text-sm text-slate-600">Total Duty Entries</div>
+              <div className="text-3xl font-bold text-slate-900 mt-1">{allHistory.length}</div>
+            </div>
+            <div className="theme-card rounded-xl p-5">
+              <div className="text-sm text-slate-600">Faculty Assigned</div>
+              <div className="text-3xl font-bold text-slate-900 mt-1">{assignedFacultyIds.size}</div>
+            </div>
+            <div className="theme-card rounded-xl p-5">
+              <div className="text-sm text-slate-600">Duty Balance Index</div>
+              <div className="text-3xl font-bold text-slate-900 mt-1">{balanceIndex}%</div>
+              <div className="text-xs text-slate-500 mt-1">Higher means better distribution</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <div className="xl:col-span-2 space-y-6">
+              <div className="theme-card rounded-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-bold text-slate-900">Saved Dates</h2>
+                  <span className="text-xs text-slate-500">Click a date to load in Duty Roster</span>
+                </div>
+                <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+                  {savedAssignments.length === 0 ? (
+                    <div className="theme-panel rounded-lg p-4 text-sm text-slate-600">
+                      No saved duty roster yet.
+                    </div>
+                  ) : (
+                    savedAssignments.map(item => {
+                      const slot = countAssignmentSlots(item);
+                      const completion = slot.total ? Math.round((slot.filled / slot.total) * 100) : 0;
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => openSavedDate(item.date)}
+                          className="w-full text-left theme-panel rounded-lg p-4 border border-slate-200 hover:border-blue-300 hover:bg-blue-50/40 transition-colors cursor-pointer"
+                        >
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                          <div>
+                              <div className="font-semibold text-slate-900">
+                                {new Date(item.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', weekday: 'short' })}
+                              </div>
+                              <div className="text-xs text-slate-600 mt-1">
+                                Shift: {item.shiftMode === 'both' ? 'Both' : item.shiftMode === 'forenoon' ? 'Forenoon' : 'Afternoon'}
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between sm:justify-start gap-3 w-full sm:w-auto">
+                              <div className="text-right">
+                                <div className="text-xs text-slate-500">Filled Slots</div>
+                                <div className="font-semibold text-slate-900">{slot.filled}/{slot.total}</div>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  resetSavedDate(item.date);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-red-50 text-red-700 border border-red-200 text-xs font-semibold hover:bg-red-100 transition-colors"
+                                title="Reset this saved date"
+                              >
+                                <Trash2 size={13} />
+                                Reset
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-3 h-2 rounded-full bg-slate-200 overflow-hidden">
+                            <div className="h-full bg-blue-600" style={{ width: `${completion}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="theme-card rounded-xl p-6">
+                <h2 className="text-lg font-bold text-slate-900 mb-4">Roster Tools</h2>
+                <div className="space-y-4">
+                  <div className="text-sm font-semibold text-slate-800">Roster Export</div>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={exportAllDates}
+                      onChange={(e) => setExportAllDates(e.target.checked)}
+                    />
+                    All dates
+                  </label>
+                  {!exportAllDates && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-slate-600 mb-1">From</label>
+                        <input
+                          type="date"
+                          value={exportFrom}
+                          onChange={(e) => setExportFrom(e.target.value)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-600 mb-1">To</label>
+                        <input
+                          type="date"
+                          value={exportTo}
+                          onChange={(e) => setExportTo(e.target.value)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    onClick={downloadRosterCsv}
+                    className="w-full px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors"
+                  >
+                    Download CSV
+                  </button>
+
+                  <div className="text-sm font-semibold text-slate-800 pt-4 border-t border-slate-200">Reset</div>
+                  <div>
+                    <label className="block text-xs text-slate-600 mb-1">Target date</label>
+                    <input
+                      type="date"
+                      value={selectedDate}
+                      onChange={(e) => setSelectedDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <button
+                    onClick={handleResetDate}
+                    className="w-full px-4 py-2 bg-amber-100 text-amber-800 rounded-lg text-sm font-medium hover:bg-amber-200 transition-colors"
+                  >
+                    Reset Selected Date
+                  </button>
+                  <button
+                    onClick={handleResetAll}
+                    className="w-full px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors"
+                  >
+                    Reset All Data
+                  </button>
+
+                  <div className="text-sm font-semibold text-slate-800 pt-4 border-t border-slate-200">Backup & Restore</div>
+                  <button
+                    onClick={downloadBackup}
+                    className="w-full px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors"
+                  >
+                    Download Backup
+                  </button>
+                  <label className="block text-xs text-slate-600">
+                    Restore from backup
+                    <input
+                      type="file"
+                      accept="application/json"
+                      onChange={handleImportBackup}
+                      className="mt-2 w-full text-xs"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <div className="theme-card rounded-xl p-6">
+                <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  <TrendingUp size={18} />
+                  Duty Count Preview
+                </h2>
+                <div className="space-y-3">
+                  {topFacultyLoad.length === 0 ? (
+                    <div className="text-sm text-slate-600">No duty data yet.</div>
+                  ) : (
+                    topFacultyLoad.map(faculty => {
+                      const count = faculty.dutyCount || 0;
+                      const width = Math.max(6, Math.round((count / maxDutyCount) * 100));
+                      return (
+                        <div key={faculty.id}>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="text-slate-700 truncate pr-2">{faculty.name}</span>
+                            <span className="text-slate-500">{count}</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                            <div className="h-full bg-emerald-500" style={{ width: `${width}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="theme-card rounded-xl p-6">
+                <h2 className="text-lg font-bold text-slate-900 mb-4">Weekday Load</h2>
+                <div className="space-y-2">
+                  {Array.from(weekdayDutyMap.entries()).map(([day, count]) => {
+                    const width = Math.round((count / maxWeekdayCount) * 100);
+                    return (
+                      <div key={day} className="grid grid-cols-[42px_1fr_36px] items-center gap-2">
+                        <span className="text-xs text-slate-600">{day}</span>
+                        <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                          <div className="h-full bg-violet-500" style={{ width: `${width}%` }} />
+                        </div>
+                        <span className="text-xs text-slate-600 text-right">{count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Faculty Directory View
+  if (viewMode === 'directory') {
+    return (
+      <div className="min-h-screen theme-root" data-theme={theme}>
+        <header className="theme-header border-b sticky top-0 z-50 shadow-sm">
+          <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-8 w-full md:w-auto">
+                <h1 className="text-xl sm:text-2xl font-bold text-slate-900">VIC Duty Roster</h1>
+                <nav className="flex flex-wrap gap-1">
+                  <button
+                    onClick={() => setViewMode('dashboard')}
+                    className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
+                  >
+                    <LayoutDashboard size={18} />
+                    Dashboard
+                  </button>
+                  <button
+                    onClick={() => setViewMode('roster')}
+                    className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
+                  >
+                    <ClipboardList size={18} />
+                    Duty Roster
+                  </button>
+                  <button
+                    onClick={() => setViewMode('directory')}
+                    className="px-4 py-2 rounded-lg bg-blue-100 text-blue-700 font-medium flex items-center gap-2"
+                  >
+                    <Users size={18} />
+                    Faculty Directory
+                  </button>
+                </nav>
+              </div>
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <select
+                  value={theme}
+                  onChange={(e) => setTheme(e.target.value)}
+                  className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                >
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                  <option value="solar">Solar</option>
+                  <option value="cool">Cool</option>
+                </select>
+                <button
+                  onClick={handleLogout}
+                  className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors text-sm font-medium"
+                >
+                  Logout
+                </button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-8">
           <div className="theme-card rounded-xl shadow-sm p-6 mb-6">
             <div className="flex flex-col md:flex-row gap-4">
               <div className="flex-1 relative">
@@ -908,6 +1344,33 @@ export default function DutyRoster() {
                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
               </div>
             </div>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Sort by</label>
+                <select
+                  value={directorySortBy}
+                  onChange={(e) => setDirectorySortBy(e.target.value as FacultySortBy)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                >
+                  <option value="name">Name</option>
+                  <option value="department">Department</option>
+                  <option value="designation">Designation</option>
+                  <option value="dutyCount">Duty Count</option>
+                  <option value="fid">FID</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Order</label>
+                <select
+                  value={directorySortOrder}
+                  onChange={(e) => setDirectorySortOrder(e.target.value as SortOrder)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                >
+                  <option value="asc">Ascending</option>
+                  <option value="desc">Descending</option>
+                </select>
+              </div>
+            </div>
             <div className="mt-4 flex items-center gap-4 text-sm text-slate-600">
               <span className="font-medium">
                 Showing {filteredFaculty.length} of {allFaculty.length} faculty members
@@ -916,7 +1379,7 @@ export default function DutyRoster() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredFaculty.map((faculty) => (
+            {sortedDirectoryFaculty.map((faculty) => (
               <div
                 key={faculty.id}
                 onClick={() => setSelectedFaculty(faculty)}
@@ -978,7 +1441,7 @@ export default function DutyRoster() {
               </div>
               
               <div className="p-8 space-y-6">
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-slate-600 text-sm font-medium">
                       <Building2 size={16} />
@@ -996,16 +1459,16 @@ export default function DutyRoster() {
                 </div>
 
                 {selectedFaculty.fid && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <div className="flex items-center gap-2 text-blue-700 font-medium mb-2">
+                  <div className="theme-panel border border-slate-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 text-blue-600 font-medium mb-2">
                       <Clock size={18} />
                       Faculty Improvement Day (FID)
                     </div>
-                    <p className="text-blue-900 font-semibold">{selectedFaculty.fid}</p>
+                    <p className="text-slate-900 font-semibold">{selectedFaculty.fid}</p>
                   </div>
                 )}
 
-                <div className="bg-slate-50 rounded-lg p-4">
+                <div className="theme-panel rounded-lg p-4">
                   <div className="flex items-center gap-2 text-slate-600 font-medium mb-2">
                     <ClipboardList size={18} />
                     Duty Statistics
@@ -1016,17 +1479,17 @@ export default function DutyRoster() {
                   </p>
                 </div>
 
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="theme-panel border border-slate-200 rounded-lg p-4">
                   <div className="flex items-center gap-2 text-amber-700 font-medium mb-3">
                     <History size={18} />
                     Duty History
                   </div>
                   <div className="space-y-2 max-h-60 overflow-y-auto">
                     {getDutyHistoryByFaculty(selectedFaculty.id).length === 0 ? (
-                      <p className="text-sm text-amber-600">No duty history yet</p>
+                      <p className="text-sm text-slate-600">No duty history yet</p>
                     ) : (
                       getDutyHistoryByFaculty(selectedFaculty.id).map(history => (
-                        <div key={history.id} className="text-sm theme-panel rounded p-2 border border-amber-100">
+                        <div key={history.id} className="text-sm theme-card rounded p-2 border border-slate-200">
                           <div className="flex justify-between">
                             <span className="font-semibold text-slate-700">
                               {new Date(history.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
@@ -1052,11 +1515,18 @@ export default function DutyRoster() {
   return (
     <div className="min-h-screen theme-root" data-theme={theme}>
       <header className="theme-header border-b sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-8">
-              <h1 className="text-2xl font-bold text-slate-900">VIC Duty Roster</h1>
-              <nav className="flex gap-1">
+          <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-8 w-full md:w-auto">
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900">VIC Duty Roster</h1>
+              <nav className="flex flex-wrap gap-1">
+                <button
+                  onClick={() => setViewMode('dashboard')}
+                  className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
+                >
+                  <LayoutDashboard size={18} />
+                  Dashboard
+                </button>
                 <button
                   onClick={() => setViewMode('roster')}
                   className="px-4 py-2 rounded-lg bg-blue-100 text-blue-700 font-medium flex items-center gap-2"
@@ -1073,7 +1543,7 @@ export default function DutyRoster() {
                 </button>
               </nav>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 w-full md:w-auto">
               <select
                 value={theme}
                 onChange={(e) => setTheme(e.target.value)}
@@ -1095,7 +1565,7 @@ export default function DutyRoster() {
           </div>
         </header>
 
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-8">
         <div className="theme-card rounded-xl shadow-sm p-6 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
@@ -1159,8 +1629,11 @@ export default function DutyRoster() {
                 onDragStart={handleDragStart}
                 onDragOver={handleDragOver}
                 onDropOnSlot={(roomId, slotId) => handleDropOnSlot(1, roomId, slotId)}
+                onSelectSlotFaculty={(roomId, slotId, facultyName) => handleSelectSlotFaculty(1, roomId, slotId, facultyName)}
                 removeFromSlot={(roomId, slotId) => removeFromSlot(1, roomId, slotId)}
                 assignedFaculty={takenByShift1}
+                compactMode={isCompactScreen}
+                slotFacultyOptions={slotOptions1}
               />
             )}
 
@@ -1181,8 +1654,11 @@ export default function DutyRoster() {
                 onDragStart={handleDragStart}
                 onDragOver={handleDragOver}
                 onDropOnSlot={(roomId, slotId) => handleDropOnSlot(2, roomId, slotId)}
+                onSelectSlotFaculty={(roomId, slotId, facultyName) => handleSelectSlotFaculty(2, roomId, slotId, facultyName)}
                 removeFromSlot={(roomId, slotId) => removeFromSlot(2, roomId, slotId)}
                 assignedFaculty={takenByShift2}
+                compactMode={isCompactScreen}
+                slotFacultyOptions={slotOptions2}
               />
             )}
 
@@ -1212,7 +1688,7 @@ export default function DutyRoster() {
           </div>
 
           <div className="space-y-6">
-            <div className="theme-card rounded-xl shadow-sm p-6 sticky top-24">
+            <div className="theme-card rounded-xl shadow-sm p-6 lg:sticky lg:top-24">
               <h2 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <Users size={20} />
                 Available Faculty ({sortedEligibleFaculty.length})
@@ -1235,8 +1711,40 @@ export default function DutyRoster() {
                   {allowRepeatDuty ? 'Enabled' : 'Disabled'}
                 </button>
               </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Sort by</label>
+                  <select
+                    value={availableSortBy}
+                    onChange={(e) => setAvailableSortBy(e.target.value as FacultySortBy)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  >
+                    <option value="name">Name</option>
+                    <option value="department">Department</option>
+                    <option value="designation">Designation</option>
+                    <option value="dutyCount">Duty Count</option>
+                    <option value="fid">FID</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Order</label>
+                  <select
+                    value={availableSortOrder}
+                    onChange={(e) => setAvailableSortOrder(e.target.value as SortOrder)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  >
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
+                  </select>
+                </div>
+              </div>
 
               <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                {isCompactScreen && (
+                  <div className="text-xs rounded-lg px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200">
+                    Assign invigilators directly from each room slot dropdown.
+                  </div>
+                )}
                 {sortedEligibleFaculty.length === 0 ? (
                   <p className="text-center py-8 text-slate-500">No faculty available for this date</p>
                 ) : (
@@ -1244,9 +1752,9 @@ export default function DutyRoster() {
                     {sortedEligibleFaculty.map(faculty => (
                       <div
                         key={`avail-${faculty.id}`}
-                        draggable
+                        draggable={!isCompactScreen}
                         onDragStart={(e) => handleDragStart(e, { type: 'faculty', facultyName: faculty.name })}
-                        className="px-4 py-3 bg-slate-50 hover:bg-blue-50 rounded-lg transition-colors cursor-move group border border-transparent hover:border-blue-200"
+                        className={`px-4 py-3 bg-slate-50 hover:bg-blue-50 rounded-lg transition-colors group border border-transparent hover:border-blue-200 ${isCompactScreen ? '' : 'cursor-move'}`}
                       >
                         <div className="flex items-center gap-2">
                           <GripVertical size={16} className="text-slate-400 group-hover:text-blue-500" />
@@ -1270,12 +1778,20 @@ export default function DutyRoster() {
 
               <div className="mt-6 pt-6 border-t border-slate-200">
                 <button
-                  onClick={handleSaveAndGenerate}
+                  onClick={handlePreviewAndPrint}
                   disabled={!canGenerate}
-                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors shadow-lg shadow-blue-600/30"
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-white text-blue-700 border border-blue-300 rounded-lg font-medium hover:bg-blue-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 disabled:cursor-not-allowed transition-colors"
                 >
                   <Printer size={18} />
-                  Save & Generate Chart
+                  Preview & Print
+                </button>
+                <button
+                  onClick={handleSaveAndPrint}
+                  disabled={!canGenerate}
+                  className="w-full mt-3 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors shadow-lg shadow-blue-600/30"
+                >
+                  <Printer size={18} />
+                  Save & Print
                 </button>
                 
                 {!canGenerate && (
@@ -1286,81 +1802,6 @@ export default function DutyRoster() {
                 )}
               </div>
 
-              <details className="mt-6 pt-4 border-t border-slate-200">
-                <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-                  Roster Export & Reset
-                </summary>
-                <div className="mt-4 space-y-4">
-                  <div className="text-sm font-semibold text-slate-800">Roster Export</div>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={exportAllDates}
-                      onChange={(e) => setExportAllDates(e.target.checked)}
-                    />
-                    All dates
-                  </label>
-                  {!exportAllDates && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs text-slate-600 mb-1">From</label>
-                        <input
-                          type="date"
-                          value={exportFrom}
-                          onChange={(e) => setExportFrom(e.target.value)}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-slate-600 mb-1">To</label>
-                        <input
-                          type="date"
-                          value={exportTo}
-                          onChange={(e) => setExportTo(e.target.value)}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                        />
-                      </div>
-                    </div>
-                  )}
-                  <button
-                    onClick={downloadRosterCsv}
-                    className="w-full px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors"
-                  >
-                    Download CSV
-                  </button>
-
-                  <div className="text-sm font-semibold text-slate-800 pt-4 border-t border-slate-200">Reset Duty Count</div>
-                  <button
-                    onClick={handleResetDate}
-                    className="w-full px-4 py-2 bg-amber-100 text-amber-800 rounded-lg text-sm font-medium hover:bg-amber-200 transition-colors"
-                  >
-                    Reset This Date
-                  </button>
-                  <button
-                    onClick={handleResetAll}
-                    className="w-full px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors"
-                  >
-                    Reset All
-                  </button>
-
-                  <div className="text-sm font-semibold text-slate-800 pt-4 border-t border-slate-200">Backup & Restore</div>
-                  <button
-                    onClick={downloadBackup}
-                    className="w-full px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors"
-                  >
-                    Download Backup
-                  </button>
-                  <label className="block text-xs text-slate-600">
-                    Restore from backup
-                    <input
-                      type="file"
-                      accept="application/json"
-                      onChange={handleImportBackup}
-                      className="mt-2 w-full text-xs"
-                    />
-                  </label>
-                </div>
-              </details>
             </div>
           </div>
         </div>
@@ -1386,8 +1827,11 @@ function ShiftCard({
   onDragStart,
   onDragOver,
   onDropOnSlot,
+  onSelectSlotFaculty,
   removeFromSlot,
-  assignedFaculty
+  assignedFaculty,
+  compactMode,
+  slotFacultyOptions
 }: {
   shiftNumber: number;
   title: string;
@@ -1404,15 +1848,18 @@ function ShiftCard({
   onDragStart: (e: React.DragEvent, item: DragItem) => void;
   onDragOver: (e: React.DragEvent) => void;
   onDropOnSlot: (roomId: number, slotId: string) => void;
+  onSelectSlotFaculty: (roomId: number, slotId: string, facultyName: string) => void;
   removeFromSlot: (roomId: number, slotId: string) => void;
   assignedFaculty: Set<string>;
+  compactMode: boolean;
+  slotFacultyOptions: Faculty[];
 }) {
   const totalSlots = rooms.reduce((sum, r) => sum + r.slots.length, 0);
   const filledSlots = rooms.reduce((sum, r) => sum + r.slots.filter(s => s.facultyName).length, 0);
 
   return (
     <div className="theme-card rounded-xl shadow-sm p-6">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h2 className="text-xl font-bold text-slate-900">{title}</h2>
           <p className="text-sm text-slate-600 mt-1">{shiftNumber === 1 ? 'Morning examination shift' : 'Afternoon examination shift'}</p>
@@ -1463,8 +1910,8 @@ function ShiftCard({
 
         {rooms.map((room) => (
           <div key={room.id} className="border-2 border-slate-200 rounded-lg p-4 hover:border-blue-300 transition-colors bg-slate-50/50">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="flex-1 grid grid-cols-3 gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-4">
+              <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 mb-1">
                     <DoorOpen size={14} className="text-blue-500" />
@@ -1507,7 +1954,7 @@ function ShiftCard({
               </div>
               <button
                 onClick={() => removeRoom(room.id)}
-                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors mt-5"
+                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors self-end sm:self-auto sm:mt-5"
               >
                 <Trash2 size={18} />
               </button>
@@ -1523,16 +1970,29 @@ function ShiftCard({
                   onDrop={() => onDropOnSlot(room.id, slot.id)}
                   className={`relative border-2 border-dashed rounded-lg p-3 transition-all ${
                     slot.facultyName 
-                      ? 'border-blue-300 bg-blue-50' 
-                      : 'border-slate-300 bg-transparent hover:border-blue-400 hover:bg-blue-50/30'
+                      ? 'slot-assigned' 
+                      : 'slot-empty'
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600">
+                      <div className="slot-number w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">
                         {idx + 1}
                       </div>
-                      {slot.facultyName ? (
+                      {compactMode ? (
+                        <select
+                          value={slot.facultyName || ''}
+                          onChange={(e) => onSelectSlotFaculty(room.id, slot.id, e.target.value)}
+                          className="min-w-[220px] w-full max-w-xs px-2 py-1.5 border border-slate-300 rounded-md text-sm bg-white"
+                        >
+                          <option value="">Select Invigilator</option>
+                          {slotFacultyOptions.map(f => (
+                            <option key={`slot-option-${room.id}-${slot.id}-${f.id}`} value={f.name}>
+                              {f.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : slot.facultyName ? (
                         <div
                           draggable
                           onDragStart={(e) => onDragStart(e, {
@@ -1545,15 +2005,18 @@ function ShiftCard({
                           className="flex items-center gap-2 cursor-move"
                         >
                           <GripVertical size={14} className="text-blue-400" />
-                          <span className="font-medium text-sm text-slate-900">{slot.facultyName}</span>
+                          <span className="slot-name font-medium text-sm">{slot.facultyName}</span>
                         </div>
                       ) : (
-                        <span className="text-sm text-slate-400 italic">Drag faculty here...</span>
+                        <span className="slot-placeholder text-sm italic">Drag faculty here...</span>
                       )}
                     </div>
                     {slot.facultyName && (
                       <button
-                        onClick={() => removeFromSlot(room.id, slot.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeFromSlot(room.id, slot.id);
+                        }}
                         className="text-red-500 hover:text-red-700 hover:bg-red-100 p-1 rounded transition-colors"
                       >
                         <X size={16} />

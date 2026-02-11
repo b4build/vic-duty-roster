@@ -40,6 +40,10 @@ export const deleteDutyAssignment = (date: string): void => {
   localStorage.setItem(STORAGE_KEYS.DUTIES, JSON.stringify(filtered));
 };
 
+export const clearAllDutyAssignments = (): void => {
+  localStorage.setItem(STORAGE_KEYS.DUTIES, JSON.stringify([]));
+};
+
 // Duty History
 export const addDutyHistory = (history: DutyHistory): void => {
   const all = getAllDutyHistory();
@@ -174,18 +178,23 @@ export const generateDutyHistoryFromAssignment = (assignment: DutyAssignment): D
 // Update duty counts when saving
 export const updateDutyCounts = (assignment: DutyAssignment): void => {
   const history = generateDutyHistoryFromAssignment(assignment);
-  
+
   // Clear old history for this date
   const allHistory = getAllDutyHistory().filter(h => h.date !== assignment.date);
-  localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify([...allHistory, ...history]));
-  
+  const mergedHistory = [...allHistory, ...history];
+  localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(mergedHistory));
+
   // Recalculate duty counts for all faculty
   const faculty = getAllFaculty();
-  const updatedFaculty = faculty.map(f => {
-    const count = getAllDutyHistory().filter(h => h.facultyId === f.id).length;
-    return { ...f, dutyCount: count };
+  const countsByFacultyId = new Map<string, number>();
+  mergedHistory.forEach(entry => {
+    countsByFacultyId.set(entry.facultyId, (countsByFacultyId.get(entry.facultyId) || 0) + 1);
   });
-  
+
+  const updatedFaculty = faculty.map(f => {
+    return { ...f, dutyCount: countsByFacultyId.get(f.id) || 0 };
+  });
+
   localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(updatedFaculty));
 };
 
