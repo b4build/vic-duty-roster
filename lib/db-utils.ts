@@ -78,6 +78,22 @@ export const updateFacultyDutyCount = (facultyId: string, increment: number): vo
   localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(updated));
 };
 
+export const updateFacultyRecord = (
+  facultyId: string,
+  updates: Partial<Omit<Faculty, 'id'>>
+): Faculty | null => {
+  const faculty = getAllFaculty();
+  let updatedRecord: Faculty | null = null;
+  const updated = faculty.map(f => {
+    if (f.id !== facultyId) return f;
+    updatedRecord = { ...f, ...updates };
+    return updatedRecord;
+  });
+  if (!updatedRecord) return null;
+  localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(updated));
+  return updatedRecord;
+};
+
 export const getAllFaculty = (): Faculty[] => {
   if (typeof window === 'undefined') return [];
   const data = localStorage.getItem(STORAGE_KEYS.FACULTY);
@@ -93,6 +109,10 @@ export const initializeFacultyData = (initialData: Faculty[]): void => {
   if (!existing) {
     localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(initialData));
   }
+};
+
+export const replaceFacultyData = (faculty: Faculty[]): void => {
+  localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(faculty));
 };
 
 // Generate duty history from assignment

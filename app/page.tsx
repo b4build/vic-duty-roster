@@ -2,10 +2,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Calendar, Users, Printer, Trash2, Plus, Search, Filter, X, ChevronDown, Clock, Building2, UserCircle2, AlertCircle, ClipboardList, DoorOpen, UserCheck, GripVertical, History, LayoutDashboard, TrendingUp } from 'lucide-react';
-import { getAvailableFaculty } from '@/lib/roster-utils';
 import facultyData from '@/lib/faculty-data.json';
 import { Faculty, Room, InvigilatorSlot, DragItem, DutyAssignment, ShiftData } from '@/lib/types';
-import { saveDutyAssignment, getDutyAssignmentByDate, updateDutyCounts, initializeFacultyData, getAllFaculty, getDutyHistoryByFaculty, getAllDutyAssignments, getAllDutyHistory, resetDutyCountsForDate, resetAllDutyCounts, exportBackupData, importBackupData, deleteDutyAssignment, clearAllDutyAssignments } from '@/lib/db-utils';
+import { saveDutyAssignment, getDutyAssignmentByDate, updateDutyCounts, initializeFacultyData, getAllFaculty, getDutyHistoryByFaculty, getAllDutyAssignments, getAllDutyHistory, resetDutyCountsForDate, resetAllDutyCounts, exportBackupData, importBackupData, deleteDutyAssignment, clearAllDutyAssignments, replaceFacultyData, updateFacultyRecord } from '@/lib/db-utils';
 
 type ViewMode = 'roster' | 'directory' | 'dashboard';
 type FacultySortBy = 'name' | 'department' | 'designation' | 'dutyCount' | 'fid';
@@ -19,6 +18,15 @@ export default function DutyRoster() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
   const [selectedFaculty, setSelectedFaculty] = useState<Faculty | null>(null);
+  const [isEditingFaculty, setIsEditingFaculty] = useState(false);
+  const [facultyEdit, setFacultyEdit] = useState({
+    designation: '',
+    department: '',
+    fid: '',
+    shortName: '',
+    unavailable: '',
+    gender: '' as '' | 'Male' | 'Female'
+  });
   const [directorySortBy, setDirectorySortBy] = useState<FacultySortBy>('name');
   const [directorySortOrder, setDirectorySortOrder] = useState<SortOrder>('asc');
   
@@ -66,7 +74,7 @@ export default function DutyRoster() {
   // Initialize faculty data and load saved assignment
   useEffect(() => {
     initializeFacultyData(facultyData as Faculty[]);
-    const filtered = getAvailableFaculty(selectedDate);
+    const filtered = getAvailableFacultyByDate(selectedDate, getAllFaculty());
     setAvailableFaculty(filtered);
     
     // Load saved duty for this date
@@ -166,6 +174,18 @@ export default function DutyRoster() {
       });
     }
     return slots;
+  };
+
+  const getAvailableFacultyByDate = (dateValue: string, source: Faculty[]) => {
+    const date = new Date(dateValue);
+    const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+    return source.filter(f => {
+      const fid = (f.fid || '').toLowerCase();
+      if (!fid) return true;
+      const fidDays = fid.split(',').map(d => d.trim()).filter(Boolean);
+      const isFidDay = fidDays.some(day => dayName.includes(day) || day.includes(dayName));
+      return !isFidDay;
+    });
   };
 
   const departments = ['all', ...Array.from(new Set(facultyData.map(f => f.department)))];
@@ -323,7 +343,7 @@ export default function DutyRoster() {
   const openSavedDate = (date: string) => {
     // Always force-load the selected date, even if it's already selected.
     loadDutyAssignment(date);
-    setAvailableFaculty(getAvailableFaculty(date));
+    setAvailableFaculty(getAvailableFacultyByDate(date, getAllFaculty()));
     setSelectedDate(date);
     setViewMode('roster');
   };
@@ -335,7 +355,7 @@ export default function DutyRoster() {
     deleteDutyAssignment(date);
     if (selectedDate === date) {
       loadDutyAssignment(date);
-      setAvailableFaculty(getAvailableFaculty(date));
+      setAvailableFaculty(getAvailableFacultyByDate(date, getAllFaculty()));
     }
     setDataVersion(v => v + 1);
   };
@@ -751,7 +771,7 @@ export default function DutyRoster() {
     resetDutyCountsForDate(selectedDate);
     deleteDutyAssignment(selectedDate);
     loadDutyAssignment(selectedDate);
-    setAvailableFaculty(getAvailableFaculty(selectedDate));
+    setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
     setDataVersion(v => v + 1);
   };
 
@@ -761,13 +781,149 @@ export default function DutyRoster() {
     resetAllDutyCounts();
     clearAllDutyAssignments();
     loadDutyAssignment(selectedDate);
-    setAvailableFaculty(getAvailableFaculty(selectedDate));
+    setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
+    setDataVersion(v => v + 1);
+  };
+
+  const startEditFaculty = () => {
+    if (!selectedFaculty) return;
+    setFacultyEdit({
+      designation: selectedFaculty.designation || '',
+      department: selectedFaculty.department || '',
+      fid: selectedFaculty.fid || '',
+      shortName: selectedFaculty.shortName || '',
+      unavailable: selectedFaculty.unavailable || '',
+      gender: selectedFaculty.gender || ''
+    });
+    setIsEditingFaculty(true);
+  };
+
+  const cancelEditFaculty = () => {
+    setIsEditingFaculty(false);
+  };
+
+  const saveEditedFaculty = () => {
+    if (!selectedFaculty) return;
+    if (!facultyEdit.department.trim() || !facultyEdit.designation.trim()) {
+      alert('Department and Designation are required.');
+      return;
+    }
+    const updated = updateFacultyRecord(selectedFaculty.id, {
+      department: facultyEdit.department.trim(),
+      designation: facultyEdit.designation.trim(),
+      fid: facultyEdit.fid.trim(),
+      shortName: facultyEdit.shortName.trim() || undefined,
+      unavailable: facultyEdit.unavailable.trim(),
+      gender: facultyEdit.gender || undefined
+    });
+    if (!updated) {
+      alert('Failed to update faculty record.');
+      return;
+    }
+    setSelectedFaculty(updated);
+    setIsEditingFaculty(false);
+    setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
     setDataVersion(v => v + 1);
   };
 
   const handleLogout = async () => {
     await fetch('/api/logout', { method: 'POST' });
     router.push('/login');
+  };
+
+  const downloadFacultyJson = () => {
+    const data = getAllFaculty();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `vic-faculty-data-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const sanitizeCurrentFormByFaculty = (facultyList: Faculty[]) => {
+    const allowed = new Set(facultyList.map(f => f.name));
+    if (super1 && !allowed.has(super1)) setSuper1('');
+    if (super2 && !allowed.has(super2)) setSuper2('');
+    setRooms1(prev => prev.map(room => ({
+      ...room,
+      slots: room.slots.map(slot =>
+        slot.facultyName && !allowed.has(slot.facultyName)
+          ? { ...slot, facultyName: null }
+          : slot
+      )
+    })));
+    setRooms2(prev => prev.map(room => ({
+      ...room,
+      slots: room.slots.map(slot =>
+        slot.facultyName && !allowed.has(slot.facultyName)
+          ? { ...slot, facultyName: null }
+          : slot
+      )
+    })));
+  };
+
+  const handleImportFacultyJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed)) {
+        alert('Invalid faculty file. Expected a JSON array.');
+        return;
+      }
+
+      const normalized: Faculty[] = parsed.map((item: any, idx: number) => {
+        const name = String(item?.name || '').trim();
+        const department = String(item?.department || '').trim();
+        const designation = String(item?.designation || '').trim();
+        if (!name || !department || !designation) {
+          throw new Error(`Row ${idx + 1}: name, department and designation are required.`);
+        }
+        const id = String(item?.id || `${department.toUpperCase().slice(0, 4)}-${idx + 1}`);
+        const dutyCount = Number.isFinite(Number(item?.dutyCount)) ? Number(item?.dutyCount) : 0;
+        return {
+          id,
+          name,
+          department,
+          designation,
+          fid: String(item?.fid || '').trim(),
+          unavailable: String(item?.unavailable || '').trim(),
+          shortName: String(item?.shortName || '').trim() || undefined,
+          dutyCount,
+          gender: item?.gender === 'Male' || item?.gender === 'Female' ? item.gender : undefined
+        };
+      });
+
+      const uniqueById = new Set<string>();
+      const uniqueByName = new Set<string>();
+      normalized.forEach((f, idx) => {
+        if (uniqueById.has(f.id)) throw new Error(`Duplicate id at row ${idx + 1}: ${f.id}`);
+        if (uniqueByName.has(f.name.toLowerCase())) throw new Error(`Duplicate name at row ${idx + 1}: ${f.name}`);
+        uniqueById.add(f.id);
+        uniqueByName.add(f.name.toLowerCase());
+      });
+
+      const ok = window.confirm(
+        `Replace faculty master with ${normalized.length} records?\n\nThis updates faculty directory and roster assignment options.`
+      );
+      if (!ok) return;
+
+      replaceFacultyData(normalized);
+      sanitizeCurrentFormByFaculty(normalized);
+      setSelectedFaculty(null);
+      setAvailableFaculty(getAvailableFacultyByDate(selectedDate, normalized));
+      setDataVersion(v => v + 1);
+      alert('Faculty data updated successfully.');
+    } catch (error: any) {
+      alert(error?.message || 'Failed to import faculty data.');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const downloadWord = () => {
@@ -1205,6 +1361,23 @@ export default function DutyRoster() {
                       className="mt-2 w-full text-xs"
                     />
                   </label>
+
+                  <div className="text-sm font-semibold text-slate-800 pt-4 border-t border-slate-200">Faculty Data</div>
+                  <button
+                    onClick={downloadFacultyJson}
+                    className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
+                  >
+                    Download Faculty JSON
+                  </button>
+                  <label className="block text-xs text-slate-600">
+                    Upload faculty JSON
+                    <input
+                      type="file"
+                      accept="application/json"
+                      onChange={handleImportFacultyJson}
+                      className="mt-2 w-full text-xs"
+                    />
+                  </label>
                 </div>
               </div>
             </div>
@@ -1421,7 +1594,13 @@ export default function DutyRoster() {
         </div>
 
         {selectedFaculty && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setSelectedFaculty(null)}>
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => {
+              setSelectedFaculty(null);
+              setIsEditingFaculty(false);
+            }}
+          >
             <div className="theme-card rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white p-8 rounded-t-2xl">
                 <div className="flex items-start justify-between">
@@ -1434,12 +1613,40 @@ export default function DutyRoster() {
                       <p className="text-blue-100 mt-1">{selectedFaculty.designation}</p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setSelectedFaculty(null)}
-                    className="text-white/80 hover:text-white transition-colors"
-                  >
-                    <X size={24} />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {isEditingFaculty ? (
+                      <>
+                        <button
+                          onClick={cancelEditFaculty}
+                          className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-sm font-medium"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={saveEditedFaculty}
+                          className="px-3 py-1.5 rounded-lg bg-white text-blue-700 hover:bg-blue-50 text-sm font-semibold"
+                        >
+                          Save
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={startEditFaculty}
+                        className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-sm font-medium"
+                      >
+                        Edit
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setSelectedFaculty(null);
+                        setIsEditingFaculty(false);
+                      }}
+                      className="text-white/80 hover:text-white transition-colors"
+                    >
+                      <X size={24} />
+                    </button>
+                  </div>
                 </div>
               </div>
               
@@ -1450,7 +1657,16 @@ export default function DutyRoster() {
                       <Building2 size={16} />
                       Department
                     </div>
-                    <p className="text-slate-900 font-semibold">{selectedFaculty.department}</p>
+                    {isEditingFaculty ? (
+                      <input
+                        type="text"
+                        value={facultyEdit.department}
+                        onChange={(e) => setFacultyEdit(v => ({ ...v, department: e.target.value }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                      />
+                    ) : (
+                      <p className="text-slate-900 font-semibold">{selectedFaculty.department}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-slate-600 text-sm font-medium">
@@ -1461,27 +1677,81 @@ export default function DutyRoster() {
                   </div>
                 </div>
 
-                {selectedFaculty.fid && (
+                {(selectedFaculty.fid || isEditingFaculty) && (
                   <div className="theme-panel border border-slate-200 rounded-lg p-4">
                     <div className="flex items-center gap-2 text-blue-600 font-medium mb-2">
                       <Clock size={18} />
                       Faculty Improvement Day (FID)
                     </div>
-                    <p className="text-slate-900 font-semibold">{selectedFaculty.fid}</p>
+                    {isEditingFaculty ? (
+                      <input
+                        type="text"
+                        value={facultyEdit.fid}
+                        onChange={(e) => setFacultyEdit(v => ({ ...v, fid: e.target.value }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                      />
+                    ) : (
+                      <p className="text-slate-900 font-semibold">{selectedFaculty.fid}</p>
+                    )}
                   </div>
                 )}
 
                 <div className="theme-panel rounded-lg p-4">
                   <div className="flex items-center gap-2 text-slate-600 font-medium mb-2">
                     <ClipboardList size={18} />
-                    Duty Statistics
+                    {isEditingFaculty ? 'Faculty Details' : 'Duty Statistics'}
                   </div>
-                  <p className="text-slate-900">
-                    <span className="font-bold text-2xl text-blue-600">{selectedFaculty.dutyCount}</span>
-                    <span className="text-slate-600 ml-2">total duties assigned</span>
-                  </p>
+                  {isEditingFaculty ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-slate-600 mb-1">Designation</label>
+                        <input
+                          type="text"
+                          value={facultyEdit.designation}
+                          onChange={(e) => setFacultyEdit(v => ({ ...v, designation: e.target.value }))}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-600 mb-1">Short Name</label>
+                        <input
+                          type="text"
+                          value={facultyEdit.shortName}
+                          onChange={(e) => setFacultyEdit(v => ({ ...v, shortName: e.target.value }))}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-600 mb-1">Gender</label>
+                        <select
+                          value={facultyEdit.gender}
+                          onChange={(e) => setFacultyEdit(v => ({ ...v, gender: e.target.value as '' | 'Male' | 'Female' }))}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        >
+                          <option value="">Unspecified</option>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-600 mb-1">Unavailable</label>
+                        <input
+                          type="text"
+                          value={facultyEdit.unavailable}
+                          onChange={(e) => setFacultyEdit(v => ({ ...v, unavailable: e.target.value }))}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-slate-900">
+                      <span className="font-bold text-2xl text-blue-600">{selectedFaculty.dutyCount}</span>
+                      <span className="text-slate-600 ml-2">total duties assigned</span>
+                    </p>
+                  )}
                 </div>
 
+                {!isEditingFaculty && (
                 <div className="theme-panel border border-slate-200 rounded-lg p-4">
                   <div className="flex items-center gap-2 text-amber-700 font-medium mb-3">
                     <History size={18} />
@@ -1506,6 +1776,7 @@ export default function DutyRoster() {
                     )}
                   </div>
                 </div>
+                )}
               </div>
             </div>
           </div>
