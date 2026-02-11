@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, Users, Printer, Trash2, Plus, Search, Filter, X, ChevronDown, Clock, Building2, UserCircle2, AlertCircle, ClipboardList, DoorOpen, UserCheck, GripVertical, History, LayoutDashboard, TrendingUp } from 'lucide-react';
+import { Calendar, Users, Printer, Trash2, Plus, Search, Filter, X, ChevronDown, Clock, Building2, UserCircle2, AlertCircle, ClipboardList, DoorOpen, UserCheck, GripVertical, History, LayoutDashboard, TrendingUp, Share2, MessageCircle, Mail, Copy } from 'lucide-react';
 import facultyData from '@/lib/faculty-data.json';
 import { Faculty, Room, InvigilatorSlot, DragItem, DutyAssignment, ShiftData } from '@/lib/types';
 import { saveDutyAssignment, getDutyAssignmentByDate, updateDutyCounts, initializeFacultyData, getAllFaculty, getDutyHistoryByFaculty, getAllDutyAssignments, getAllDutyHistory, resetDutyCountsForDate, resetAllDutyCounts, exportBackupData, importBackupData, deleteDutyAssignment, clearAllDutyAssignments, replaceFacultyData, updateFacultyRecord } from '@/lib/db-utils';
@@ -9,6 +9,7 @@ import { saveDutyAssignment, getDutyAssignmentByDate, updateDutyCounts, initiali
 type ViewMode = 'roster' | 'directory' | 'dashboard';
 type FacultySortBy = 'name' | 'department' | 'designation' | 'dutyCount' | 'fid';
 type SortOrder = 'asc' | 'desc';
+const DRAFT_KEY_PREFIX = 'vic_duty_draft_';
 
 export default function DutyRoster() {
   const router = useRouter();
@@ -132,23 +133,39 @@ export default function DutyRoster() {
 
   const loadDutyAssignment = (date: string) => {
     const saved = getDutyAssignmentByDate(date);
-    if (saved) {
-      setCourse(saved.course);
-      setSemester(saved.semester);
-      setYear(saved.year);
-      setCurriculum(saved.curriculum);
-      setShiftMode(saved.shiftMode);
+    let draft: DutyAssignment | null = null;
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem(`${DRAFT_KEY_PREFIX}${date}`);
+      if (raw) {
+        try {
+          draft = JSON.parse(raw);
+        } catch {
+          draft = null;
+        }
+      }
+    }
+
+    // Always prioritize explicitly saved roster for that date.
+    // Draft is only a fallback when no saved roster exists yet.
+    const source = saved || draft;
+
+    if (source) {
+      setCourse(source.course);
+      setSemester(source.semester);
+      setYear(source.year);
+      setCurriculum(source.curriculum);
+      setShiftMode(source.shiftMode);
       
-      if (saved.shift1) {
-        setTime1(saved.shift1.time);
-        setSuper1(saved.shift1.supervisor);
-        setRooms1(saved.shift1.rooms);
+      if (source.shift1) {
+        setTime1(source.shift1.time);
+        setSuper1(source.shift1.supervisor);
+        setRooms1(source.shift1.rooms);
       }
       
-      if (saved.shift2) {
-        setTime2(saved.shift2.time);
-        setSuper2(saved.shift2.supervisor);
-        setRooms2(saved.shift2.rooms);
+      if (source.shift2) {
+        setTime2(source.shift2.time);
+        setSuper2(source.shift2.supervisor);
+        setRooms2(source.shift2.rooms);
       }
     } else {
       // Reset to defaults
@@ -322,11 +339,18 @@ export default function DutyRoster() {
   const facultyByLoad = [...allFaculty].sort((a, b) => (b.dutyCount || 0) - (a.dutyCount || 0));
   const topFacultyLoad = facultyByLoad.slice(0, 8);
   const maxDutyCount = topFacultyLoad[0]?.dutyCount || 1;
-  const maxOverallDuty = facultyByLoad[0]?.dutyCount || 0;
-  const minOverallDuty = facultyByLoad[facultyByLoad.length - 1]?.dutyCount || 0;
-  const balanceIndex = maxOverallDuty === 0
-    ? 100
-    : Math.max(0, Math.round(100 - ((maxOverallDuty - minOverallDuty) / maxOverallDuty) * 100));
+  const dutyCounts = allFaculty.map(f => f.dutyCount || 0);
+  const meanDuty = dutyCounts.length
+    ? dutyCounts.reduce((sum, count) => sum + count, 0) / dutyCounts.length
+    : 0;
+  const varianceDuty = meanDuty === 0
+    ? 0
+    : dutyCounts.reduce((sum, count) => sum + Math.pow(count - meanDuty, 2), 0) / dutyCounts.length;
+  const stdDuty = Math.sqrt(varianceDuty);
+  const cvRatio = meanDuty === 0 ? 0 : (stdDuty / meanDuty);
+  const dutyFairnessScore = Math.max(0, Math.min(100, Math.round(100 / (1 + cvRatio))));
+  const MIN_DUTIES_FOR_FAIRNESS = 20;
+  const isFairnessReliable = allHistory.length >= MIN_DUTIES_FOR_FAIRNESS;
 
   const weekdayDutyMap = (() => {
     const map = new Map<string, number>([
@@ -349,10 +373,11 @@ export default function DutyRoster() {
   };
 
   const resetSavedDate = (date: string) => {
-    const ok = window.confirm(`Reset saved duty and duty counts for ${date}? This cannot be undone.`);
+    const ok = window.confirm(`Delete saved duty and duty counts for ${date}? This cannot be undone.`);
     if (!ok) return;
     resetDutyCountsForDate(date);
     deleteDutyAssignment(date);
+    clearDraftForDate(date);
     if (selectedDate === date) {
       loadDutyAssignment(date);
       setAvailableFaculty(getAvailableFacultyByDate(date, getAllFaculty()));
@@ -678,10 +703,23 @@ export default function DutyRoster() {
     return assignment;
   };
 
+  const clearDraftForDate = (date: string) => {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(`${DRAFT_KEY_PREFIX}${date}`);
+  };
+
+  const clearAllDrafts = () => {
+    if (typeof window === 'undefined') return;
+    Object.keys(localStorage)
+      .filter(key => key.startsWith(DRAFT_KEY_PREFIX))
+      .forEach(key => localStorage.removeItem(key));
+  };
+
   const saveCurrentAssignment = () => {
     const assignment = buildAssignment();
     saveDutyAssignment(assignment);
     updateDutyCounts(assignment);
+    clearDraftForDate(selectedDate);
     setDataVersion(v => v + 1);
   };
 
@@ -770,6 +808,7 @@ export default function DutyRoster() {
     if (!ok) return;
     resetDutyCountsForDate(selectedDate);
     deleteDutyAssignment(selectedDate);
+    clearDraftForDate(selectedDate);
     loadDutyAssignment(selectedDate);
     setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
     setDataVersion(v => v + 1);
@@ -780,6 +819,7 @@ export default function DutyRoster() {
     if (!ok) return;
     resetAllDutyCounts();
     clearAllDutyAssignments();
+    clearAllDrafts();
     loadDutyAssignment(selectedDate);
     setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
     setDataVersion(v => v + 1);
@@ -955,19 +995,22 @@ export default function DutyRoster() {
     URL.revokeObjectURL(url);
   };
 
-  const downloadPdf = async () => {
+  const getPreviewCanvas = async () => {
     if (!printRef.current) return;
-    const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-      import('html2canvas'),
-      import('jspdf')
-    ]);
+    const { default: html2canvas } = await import('html2canvas');
     const element = printRef.current;
-    const canvas = await html2canvas(element, {
+    return html2canvas(element, {
       scale: 2,
       backgroundColor: '#ffffff',
       useCORS: true,
       windowWidth: element.scrollWidth
     });
+  };
+
+  const getPdfBlob = async (): Promise<Blob | null> => {
+    const canvas = await getPreviewCanvas();
+    if (!canvas) return null;
+    const { jsPDF } = await import('jspdf');
     const imgData = canvas.toDataURL('image/png');
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pageWidth = pdf.internal.pageSize.getWidth();
@@ -982,7 +1025,163 @@ export default function DutyRoster() {
       if (position < imgHeight) pdf.addPage();
     }
 
-    pdf.save(`duty-chart-${selectedDate}.pdf`);
+    return pdf.output('blob');
+  };
+
+  const getPreviewImageBlob = async (): Promise<Blob | null> => {
+    const canvas = await getPreviewCanvas();
+    if (!canvas) return null;
+    return await new Promise(resolve => canvas.toBlob(blob => resolve(blob), 'image/png'));
+  };
+
+  const downloadPdf = async () => {
+    const blob = await getPdfBlob();
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `duty-chart-${selectedDate}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const shareMessage = `VIC Duty Roster - ${new Date(selectedDate).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    weekday: 'short'
+  })}`;
+
+  const buildShareMessageForDate = (date: string) => {
+    const assignment = getDutyAssignmentByDate(date);
+    if (!assignment) return `VIC Duty Roster - ${date}`;
+    const shiftLabel =
+      assignment.shiftMode === 'both'
+        ? 'Both shifts'
+        : assignment.shiftMode === 'forenoon'
+          ? 'Forenoon'
+          : 'Afternoon';
+    return `VIC Duty Roster - ${new Date(date).toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      weekday: 'short'
+    })}\n${assignment.course} ${assignment.semester}\nShift: ${shiftLabel}`;
+  };
+
+  const handleNativeShare = async () => {
+    if (!navigator.share) {
+      alert('Native share is not supported in this browser.');
+      return;
+    }
+    try {
+      const imageBlob = await getPreviewImageBlob();
+      if (imageBlob) {
+        const imageFile = new File([imageBlob], `duty-chart-${selectedDate}.png`, { type: 'image/png' });
+        const canShareFiles = (navigator as any).canShare?.({ files: [imageFile] });
+        if (canShareFiles) {
+          await navigator.share({ title: 'VIC Duty Roster', text: shareMessage, files: [imageFile] });
+          return;
+        }
+      }
+      await navigator.share({ title: 'VIC Duty Roster', text: shareMessage });
+    } catch {
+      // user-cancel and share errors are ignored intentionally
+    }
+  };
+
+  const shareViaWhatsApp = async () => {
+    try {
+      const imageBlob = await getPreviewImageBlob();
+      if (imageBlob && navigator.share) {
+        const imageFile = new File([imageBlob], `duty-chart-${selectedDate}.png`, { type: 'image/png' });
+        const canShareFiles = (navigator as any).canShare?.({ files: [imageFile] });
+        if (canShareFiles) {
+          await navigator.share({ title: 'VIC Duty Roster', text: shareMessage, files: [imageFile] });
+          return;
+        }
+      }
+    } catch {
+      // fallback to wa link text below
+    }
+    const text = encodeURIComponent(shareMessage);
+    window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const shareViaEmail = async () => {
+    try {
+      const pdfBlob = await getPdfBlob();
+      if (pdfBlob && navigator.share) {
+        const pdfFile = new File([pdfBlob], `duty-chart-${selectedDate}.pdf`, { type: 'application/pdf' });
+        const canShareFiles = (navigator as any).canShare?.({ files: [pdfFile] });
+        if (canShareFiles) {
+          await navigator.share({ title: `Duty Roster - ${selectedDate}`, text: shareMessage, files: [pdfFile] });
+          return;
+        }
+      }
+    } catch {
+      // Fallback to mailto + downloaded PDF.
+    }
+    await downloadPdf();
+    const subject = encodeURIComponent(`Duty Roster - ${selectedDate}`);
+    const body = encodeURIComponent(
+      `${shareMessage}\n\nPDF has been downloaded as attachment file.\nPlease attach it manually if your mail client does not auto-attach.`
+    );
+    window.open(`mailto:?subject=${subject}&body=${body}`, '_self');
+  };
+
+  const copyPreviewImage = async () => {
+    try {
+      if (!navigator.clipboard || !('write' in navigator.clipboard)) {
+        alert('Image clipboard is not supported in this browser.');
+        return;
+      }
+      const imageBlob = await getPreviewImageBlob();
+      if (!imageBlob) return;
+      await (navigator.clipboard as any).write([new ClipboardItem({ 'image/png': imageBlob })]);
+      alert('Image copied to clipboard.');
+    } catch {
+      alert('Failed to copy image to clipboard.');
+    }
+  };
+
+  const copyPreviewPdf = async () => {
+    try {
+      if (!navigator.clipboard || !('write' in navigator.clipboard)) {
+        await downloadPdf();
+        await navigator.clipboard?.writeText?.(`Duty chart downloaded: duty-chart-${selectedDate}.pdf`);
+        alert('Direct PDF clipboard is not supported. PDF downloaded instead.');
+        return;
+      }
+      const pdfBlob = await getPdfBlob();
+      if (!pdfBlob) return;
+      await (navigator.clipboard as any).write([new ClipboardItem({ 'application/pdf': pdfBlob })]);
+      alert('PDF copied to clipboard.');
+    } catch {
+      await downloadPdf();
+      await navigator.clipboard?.writeText?.(`Duty chart downloaded: duty-chart-${selectedDate}.pdf`);
+      alert('PDF clipboard is limited in this browser. PDF downloaded instead.');
+    }
+  };
+
+  const shareSavedDateFromDashboard = async (date: string) => {
+    const text = buildShareMessageForDate(date);
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: `Duty Roster - ${date}`, text });
+        return;
+      } catch {
+        // ignore cancellation and continue fallback
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('Share text copied to clipboard.');
+    } catch {
+      alert('Share is not supported on this browser.');
+    }
   };
 
   const downloadBackup = () => {
@@ -1014,6 +1213,7 @@ export default function DutyRoster() {
         return;
       }
       importBackupData(data);
+      clearAllDrafts();
       setDataVersion(v => v + 1);
     } catch {
       alert('Failed to import backup.');
@@ -1021,6 +1221,42 @@ export default function DutyRoster() {
       e.target.value = '';
     }
   };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const existing = getDutyAssignmentByDate(selectedDate);
+    const now = new Date().toISOString();
+    const draft: DutyAssignment = {
+      id: existing?.id || `duty-${selectedDate}`,
+      date: selectedDate,
+      course,
+      semester,
+      year,
+      curriculum,
+      shiftMode,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      ...(shiftMode !== 'afternoon'
+        ? { shift1: { time: time1, supervisor: super1, rooms: rooms1 } }
+        : {}),
+      ...(shiftMode !== 'forenoon'
+        ? { shift2: { time: time2, supervisor: super2, rooms: rooms2 } }
+        : {})
+    };
+    localStorage.setItem(`${DRAFT_KEY_PREFIX}${selectedDate}`, JSON.stringify(draft));
+  }, [
+    course,
+    semester,
+    year,
+    curriculum,
+    shiftMode,
+    time1,
+    super1,
+    rooms1,
+    time2,
+    super2,
+    rooms2
+  ]);
 
   // Print Mode
   if (isPrintMode) {
@@ -1053,6 +1289,36 @@ export default function DutyRoster() {
             className="flex items-center gap-2 px-6 py-2 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/30"
           >
             <Printer size={18} /> Download Word
+          </button>
+          <button
+            onClick={handleNativeShare}
+            className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-700 transition-colors"
+          >
+            <Share2 size={16} /> Share
+          </button>
+          <button
+            onClick={shareViaWhatsApp}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
+          >
+            <MessageCircle size={16} /> WhatsApp
+          </button>
+          <button
+            onClick={shareViaEmail}
+            className="flex items-center gap-2 px-4 py-2 bg-sky-600 text-white rounded-lg font-medium hover:bg-sky-700 transition-colors"
+          >
+            <Mail size={16} /> Email
+          </button>
+          <button
+            onClick={copyPreviewImage}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 transition-colors"
+          >
+            <Copy size={16} /> Copy Image
+          </button>
+          <button
+            onClick={copyPreviewPdf}
+            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg font-medium hover:bg-orange-700 transition-colors"
+          >
+            <Copy size={16} /> Copy PDF
           </button>
         </div>
 
@@ -1216,9 +1482,15 @@ export default function DutyRoster() {
               <div className="text-3xl font-bold text-slate-900 mt-1">{assignedFacultyIds.size}</div>
             </div>
             <div className="theme-card rounded-xl p-5">
-              <div className="text-sm text-slate-600">Duty Balance Index</div>
-              <div className="text-3xl font-bold text-slate-900 mt-1">{balanceIndex}%</div>
-              <div className="text-xs text-slate-500 mt-1">Higher means better distribution</div>
+              <div className="text-sm text-slate-600">Duty Fairness Score</div>
+              <div className="text-3xl font-bold text-slate-900 mt-1">
+                {isFairnessReliable ? `${dutyFairnessScore}%` : '--'}
+              </div>
+              <div className="text-xs text-slate-500 mt-1">
+                {isFairnessReliable
+                  ? 'Higher means better distribution'
+                  : `Need at least ${MIN_DUTIES_FOR_FAIRNESS} duty entries (now ${allHistory.length})`}
+              </div>
             </div>
           </div>
 
@@ -1261,13 +1533,24 @@ export default function DutyRoster() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  shareSavedDateFromDashboard(item.date);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-violet-50 text-violet-700 border border-violet-200 text-xs font-semibold hover:bg-violet-100 transition-colors"
+                                title="Open preview and share this date"
+                              >
+                                <Share2 size={13} />
+                                Share
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   resetSavedDate(item.date);
                                 }}
                                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-red-50 text-red-700 border border-red-200 text-xs font-semibold hover:bg-red-100 transition-colors"
-                                title="Reset this saved date"
+                                title="Delete this saved date"
                               >
                                 <Trash2 size={13} />
-                                Reset
+                                Delete
                               </button>
                             </div>
                           </div>

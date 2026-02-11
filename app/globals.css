@@ -5,17 +5,20 @@
 /* Theme tokens */
 :root,
 [data-theme="light"] {
-  --app-bg: linear-gradient(135deg, #f8fafc 0%, #eef2ff 50%, #e0f2fe 100%);
-  --header-bg: #ffffff;
-  --header-border: #e2e8f0;
-  --card-bg: #ffffff;
-  --card-border: #e2e8f0;
-  --panel-bg: #f8fafc;
+  --app-bg: radial-gradient(circle at 8% 6%, #dbeafe 0%, #e0e7ff 24%, #f8fafc 56%, #eef2ff 100%);
+  --header-bg: rgba(255, 255, 255, 0.9);
+  --header-border: #c7d2fe;
+  --card-bg: rgba(255, 255, 255, 0.94);
+  --card-border: #cbd5e1;
+  --panel-bg: #eef4ff;
   --text: #0f172a;
-  --muted: #475569;
+  --muted: #334155;
   --input-bg: #ffffff;
-  --input-border: #cbd5f5;
-  --accent: #2563eb;
+  --input-border: #a5b4fc;
+  --accent: #1d4ed8;
+  --card-shadow: 0 10px 28px rgba(30, 64, 175, 0.12);
+  --card-shadow-soft: 0 3px 10px rgba(15, 23, 42, 0.08);
+  --header-shadow: 0 2px 12px rgba(99, 102, 241, 0.12);
 }
 
 [data-theme="dark"] {
@@ -30,6 +33,9 @@
   --input-bg: #0b1220;
   --input-border: #334155;
   --accent: #60a5fa;
+  --card-shadow: 0 12px 30px rgba(2, 6, 23, 0.45);
+  --card-shadow-soft: 0 4px 14px rgba(2, 6, 23, 0.35);
+  --header-shadow: 0 2px 12px rgba(2, 6, 23, 0.45);
 }
 
 [data-theme="solar"] {
@@ -44,6 +50,9 @@
   --input-bg: #fffaf0;
   --input-border: #f59e0b;
   --accent: #b45309;
+  --card-shadow: 0 10px 24px rgba(180, 83, 9, 0.18);
+  --card-shadow-soft: 0 3px 10px rgba(124, 92, 16, 0.16);
+  --header-shadow: 0 2px 10px rgba(217, 119, 6, 0.2);
 }
 
 [data-theme="cool"] {
@@ -58,6 +67,9 @@
   --input-bg: #f8fdff;
   --input-border: #7dd3fc;
   --accent: #0284c7;
+  --card-shadow: 0 10px 26px rgba(3, 105, 161, 0.14);
+  --card-shadow-soft: 0 3px 10px rgba(15, 23, 42, 0.08);
+  --header-shadow: 0 2px 10px rgba(14, 116, 144, 0.14);
 }
 
 .theme-root {
@@ -68,16 +80,28 @@
 .theme-header {
   background: var(--header-bg);
   border-color: var(--header-border);
+  backdrop-filter: saturate(1.15) blur(6px);
+  box-shadow: var(--header-shadow);
 }
 
 .theme-card {
   background: var(--card-bg);
   border: 1px solid var(--card-border);
+  box-shadow: var(--card-shadow-soft);
 }
 
 .theme-panel {
   background: var(--panel-bg);
   border: 1px solid var(--card-border);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+
+[data-theme="light"] .theme-card {
+  box-shadow: var(--card-shadow);
+}
+
+[data-theme="light"] .theme-panel {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0));
 }
 
 .theme-root input,
