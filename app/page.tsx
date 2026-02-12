@@ -10,6 +10,7 @@ type ViewMode = 'roster' | 'directory' | 'dashboard';
 type FacultySortBy = 'name' | 'department' | 'designation' | 'dutyCount' | 'fid';
 type SortOrder = 'asc' | 'desc';
 const DRAFT_KEY_PREFIX = 'vic_duty_draft_';
+const BLOB_BACKUP_API = '/api/blob-backup';
 
 export default function DutyRoster() {
   const router = useRouter();
@@ -40,12 +41,47 @@ export default function DutyRoster() {
   const [exportFrom, setExportFrom] = useState(new Date().toISOString().split('T')[0]);
   const [exportTo, setExportTo] = useState(new Date().toISOString().split('T')[0]);
   const [dataVersion, setDataVersion] = useState(0);
-  const [theme, setTheme] = useState('light');
+  const [theme, setTheme] = useState('dark');
   const [availableSortBy, setAvailableSortBy] = useState<FacultySortBy>('name');
   const [availableSortOrder, setAvailableSortOrder] = useState<SortOrder>('asc');
   const [isCompactScreen, setIsCompactScreen] = useState(false);
   const allFaculty = useMemo(() => getAllFaculty(), [dataVersion]);
   const printRef = useRef<HTMLDivElement | null>(null);
+
+  const syncBackupToBlob = async () => {
+    try {
+      const payload = exportBackupData();
+      const response = await fetch(BLOB_BACKUP_API, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        console.error('Blob sync failed with status:', response.status);
+      }
+    } catch (error) {
+      console.error('Blob sync failed:', error);
+    }
+  };
+
+  const hydrateFromBlob = async () => {
+    try {
+      const response = await fetch(BLOB_BACKUP_API, { cache: 'no-store' });
+      if (response.status === 404) return;
+      if (!response.ok) {
+        console.error('Blob restore failed with status:', response.status);
+        return;
+      }
+      const data = await response.json();
+      if (!data || typeof data !== 'object' || !('faculty' in data)) return;
+      importBackupData(data);
+      setDataVersion(v => v + 1);
+      loadDutyAssignment(selectedDate);
+      setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
+    } catch (error) {
+      console.error('Blob restore failed:', error);
+    }
+  };
   
   // Form fields
   const [course, setCourse] = useState('B.A. / B.Sc. / B.Com.');
@@ -81,6 +117,10 @@ export default function DutyRoster() {
     // Load saved duty for this date
     loadDutyAssignment(selectedDate);
   }, [selectedDate]);
+
+  useEffect(() => {
+    void hydrateFromBlob();
+  }, []);
 
   useEffect(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('vic_theme') : null;
@@ -383,6 +423,7 @@ export default function DutyRoster() {
       setAvailableFaculty(getAvailableFacultyByDate(date, getAllFaculty()));
     }
     setDataVersion(v => v + 1);
+    void syncBackupToBlob();
   };
 
   const addRoom = (shift: 1 | 2) => {
@@ -721,6 +762,7 @@ export default function DutyRoster() {
     updateDutyCounts(assignment);
     clearDraftForDate(selectedDate);
     setDataVersion(v => v + 1);
+    void syncBackupToBlob();
   };
 
   const handlePreviewAndPrint = () => {
@@ -812,6 +854,7 @@ export default function DutyRoster() {
     loadDutyAssignment(selectedDate);
     setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
     setDataVersion(v => v + 1);
+    void syncBackupToBlob();
   };
 
   const handleResetAll = () => {
@@ -823,6 +866,7 @@ export default function DutyRoster() {
     loadDutyAssignment(selectedDate);
     setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
     setDataVersion(v => v + 1);
+    void syncBackupToBlob();
   };
 
   const startEditFaculty = () => {
@@ -864,6 +908,7 @@ export default function DutyRoster() {
     setIsEditingFaculty(false);
     setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
     setDataVersion(v => v + 1);
+    void syncBackupToBlob();
   };
 
   const handleLogout = async () => {
@@ -958,6 +1003,7 @@ export default function DutyRoster() {
       setSelectedFaculty(null);
       setAvailableFaculty(getAvailableFacultyByDate(selectedDate, normalized));
       setDataVersion(v => v + 1);
+      void syncBackupToBlob();
       alert('Faculty data updated successfully.');
     } catch (error: any) {
       alert(error?.message || 'Failed to import faculty data.');
@@ -1221,6 +1267,7 @@ export default function DutyRoster() {
       importBackupData(data);
       clearAllDrafts();
       setDataVersion(v => v + 1);
+      void syncBackupToBlob();
     } catch {
       alert('Failed to import backup.');
     } finally {
@@ -2462,17 +2509,21 @@ function ShiftCard({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-slate-900">Examination Rooms</h3>
-          <button
-            onClick={addRoom}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-sm font-medium transition-colors"
-          >
-            <Plus size={16} />
-            Add Room
-          </button>
         </div>
 
-        {rooms.map((room) => (
+        {rooms.map((room, index) => (
           <div key={room.id} className="border-2 border-slate-200 rounded-lg p-4 hover:border-blue-300 transition-colors bg-slate-50/50">
+            {index === 0 && (
+              <div className="mb-3 flex justify-end">
+                <button
+                  onClick={addRoom}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-sm font-medium transition-colors"
+                >
+                  <Plus size={16} />
+                  Add Room
+                </button>
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-4">
               <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
@@ -2591,6 +2642,18 @@ function ShiftCard({
             </div>
           </div>
         ))}
+
+        {rooms.length === 0 && (
+          <div className="pt-2">
+            <button
+              onClick={addRoom}
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Plus size={16} />
+              Add Room
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

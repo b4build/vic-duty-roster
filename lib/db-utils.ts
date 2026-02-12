@@ -108,6 +108,15 @@ export const initializeFacultyData = (initialData: Faculty[]): void => {
   const existing = localStorage.getItem(STORAGE_KEYS.FACULTY);
   if (!existing) {
     localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(initialData));
+    return;
+  }
+  try {
+    const parsed = JSON.parse(existing);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(initialData));
+    }
+  } catch {
+    localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(initialData));
   }
 };
 
