@@ -7,7 +7,7 @@ import { Faculty, Room, InvigilatorSlot, DragItem, DutyAssignment, ShiftData } f
 import { saveDutyAssignment, getDutyAssignmentByDate, updateDutyCounts, initializeFacultyData, getAllFaculty, getDutyHistoryByFaculty, getAllDutyAssignments, getAllDutyHistory, resetDutyCountsForDate, resetAllDutyCounts, exportBackupData, importBackupData, deleteDutyAssignment, clearAllDutyAssignments, replaceFacultyData, updateFacultyRecord, syncFacultyMetadataFromSeed } from '@/lib/db-utils';
 
 type ViewMode = 'roster' | 'directory' | 'dashboard' | 'about';
-type FacultySortBy = 'name' | 'department' | 'designation' | 'dutyCount' | 'fid';
+type FacultySortBy = 'name' | 'department' | 'designation' | 'dutyCount' | 'fid' | 'shift';
 type SortOrder = 'asc' | 'desc';
 type BlobSyncStatus = {
   state: 'idle' | 'syncing' | 'synced' | 'error' | 'disabled';
@@ -93,6 +93,22 @@ const formatISODateLocal = (
   const date = parseISODateLocal(value);
   if (!date) return value;
   return date.toLocaleDateString(locale, options);
+};
+
+const formatRosterHeadingDate = (value: string): string => {
+  const date = parseISODateLocal(value);
+  if (!date) return value;
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  const weekday = date.toLocaleDateString('en-US', { weekday: 'long' });
+  return `${dd}.${mm}.${yyyy} (${weekday})`;
+};
+
+const normalizeCurriculum = (value: string | undefined): 'CCF' | 'CBCS' => {
+  const raw = (value || '').trim().toUpperCase();
+  if (raw === 'CBCS' || raw === 'UNDER CBCS') return 'CBCS';
+  return 'CCF';
 };
 
 const normalizeFacultyShift = (value: unknown): '' | 'Morning' | 'Day' => {
@@ -499,6 +515,7 @@ export default function DutyRoster() {
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
   const [selectedFaculty, setSelectedFaculty] = useState<Faculty | null>(null);
   const [isEditingFaculty, setIsEditingFaculty] = useState(false);
+  const [isAddFacultyOpen, setIsAddFacultyOpen] = useState(false);
   const [facultyEdit, setFacultyEdit] = useState({
     designation: '',
     department: '',
@@ -508,7 +525,19 @@ export default function DutyRoster() {
     gender: '' as '' | 'Male' | 'Female',
     facultyShift: '' as '' | 'Morning' | 'Day'
   });
+  const [newFacultyForm, setNewFacultyForm] = useState({
+    id: '',
+    name: '',
+    designation: '',
+    department: '',
+    fid: '',
+    shortName: '',
+    unavailable: '',
+    gender: '' as '' | 'Male' | 'Female',
+    facultyShift: '' as '' | 'Morning' | 'Day'
+  });
   const [unavailableDateInput, setUnavailableDateInput] = useState('');
+  const [newUnavailableDateInput, setNewUnavailableDateInput] = useState('');
   const [directorySortBy, setDirectorySortBy] = useState<FacultySortBy>('name');
   const [directorySortOrder, setDirectorySortOrder] = useState<SortOrder>('asc');
   
@@ -524,12 +553,15 @@ export default function DutyRoster() {
   const [theme, setTheme] = useState('dark');
   const [availableSortBy, setAvailableSortBy] = useState<FacultySortBy>('name');
   const [availableSortOrder, setAvailableSortOrder] = useState<SortOrder>('asc');
+  const [availableSearchOpen, setAvailableSearchOpen] = useState(false);
+  const [availableSearchTerm, setAvailableSearchTerm] = useState('');
   const [isCompactScreen, setIsCompactScreen] = useState(false);
   const [blobSyncStatus, setBlobSyncStatus] = useState<BlobSyncStatus>({
     state: 'idle',
     message: 'Waiting for cloud sync'
   });
   const unavailableDateInputRef = useRef<HTMLInputElement | null>(null);
+  const newUnavailableDateInputRef = useRef<HTMLInputElement | null>(null);
   const allFaculty = useMemo(() => getAllFaculty(), [dataVersion]);
   const facultyByName = useMemo(() => {
     const map = new Map<string, Faculty>();
@@ -663,7 +695,7 @@ export default function DutyRoster() {
   const [course, setCourse] = useState('B.A. / B.Sc. / B.Com.');
   const [semester, setSemester] = useState('SEM V');
   const [year, setYear] = useState('2025');
-  const [curriculum, setCurriculum] = useState('Under CCF');
+  const [curriculum, setCurriculum] = useState<'CCF' | 'CBCS'>('CCF');
   const [shiftMode, setShiftMode] = useState<'both' | 'forenoon' | 'afternoon'>('both');
   
   // Shift 1
@@ -781,7 +813,7 @@ export default function DutyRoster() {
       setCourse(source.course);
       setSemester(source.semester);
       setYear(source.year);
-      setCurriculum(source.curriculum);
+      setCurriculum(normalizeCurriculum(source.curriculum));
       setShiftMode(source.shiftMode);
       
       if (source.shift1) {
@@ -858,6 +890,7 @@ export default function DutyRoster() {
       if (sortBy === 'department') result = byText(a.department || '', b.department || '');
       if (sortBy === 'designation') result = byText(a.designation || '', b.designation || '');
       if (sortBy === 'fid') result = byText(a.fid || '', b.fid || '');
+      if (sortBy === 'shift') result = byText(getFacultyShiftLabel(a) || '', getFacultyShiftLabel(b) || '');
       if (sortBy === 'dutyCount') result = byNumber(a.dutyCount || 0, b.dutyCount || 0);
       if (result === 0) result = byText(a.name, b.name);
       return result * direction;
@@ -895,6 +928,17 @@ export default function DutyRoster() {
     ? availableFacultyWithCounts
     : availableFacultyWithCounts.filter(f => !assignedToday.has(f.name));
   const sortedEligibleFaculty = sortFacultyList(eligibleFaculty, availableSortBy, availableSortOrder);
+  const visibleAvailableFaculty = sortedEligibleFaculty.filter(faculty => {
+    const q = availableSearchTerm.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      faculty.name.toLowerCase().includes(q) ||
+      faculty.department.toLowerCase().includes(q) ||
+      faculty.designation.toLowerCase().includes(q) ||
+      (faculty.shortName || '').toLowerCase().includes(q) ||
+      faculty.id.toLowerCase().includes(q)
+    );
+  });
 
   const availForSuper1 = super1
     ? [
@@ -1534,6 +1578,105 @@ export default function DutyRoster() {
     });
   };
 
+  const resetNewFacultyForm = () => {
+    setNewFacultyForm({
+      id: '',
+      name: '',
+      designation: '',
+      department: '',
+      fid: '',
+      shortName: '',
+      unavailable: '',
+      gender: '',
+      facultyShift: ''
+    });
+    setNewUnavailableDateInput('');
+  };
+
+  const openAddFacultyModal = () => {
+    resetNewFacultyForm();
+    setIsAddFacultyOpen(true);
+  };
+
+  const closeAddFacultyModal = () => {
+    setIsAddFacultyOpen(false);
+    resetNewFacultyForm();
+  };
+
+  const toggleNewFacultyFidDay = (day: string) => {
+    setNewFacultyForm(prev => {
+      const selected = parseFidDays(prev.fid);
+      const next = selected.includes(day)
+        ? selected.filter(d => d !== day)
+        : [...selected, day];
+      return { ...prev, fid: formatFidDays(next) };
+    });
+  };
+
+  const addNewFacultyUnavailableDate = () => {
+    if (!newUnavailableDateInput) return;
+    setNewFacultyForm(prev => {
+      const existing = parseUnavailableDates(prev.unavailable);
+      return {
+        ...prev,
+        unavailable: formatUnavailableDates([...existing, newUnavailableDateInput])
+      };
+    });
+    setNewUnavailableDateInput('');
+  };
+
+  const removeNewFacultyUnavailableDate = (date: string) => {
+    setNewFacultyForm(prev => {
+      const next = parseUnavailableDates(prev.unavailable).filter(d => d !== date);
+      return { ...prev, unavailable: formatUnavailableDates(next) };
+    });
+  };
+
+  const saveNewFaculty = () => {
+    const id = newFacultyForm.id.trim();
+    const name = newFacultyForm.name.trim();
+    const designation = newFacultyForm.designation.trim();
+    const department = newFacultyForm.department.trim();
+
+    if (!id || !name || !designation || !department) {
+      alert('Faculty ID, Name, Department, and Designation are required.');
+      return;
+    }
+
+    const byId = allFaculty.some(f => f.id.trim().toLowerCase() === id.toLowerCase());
+    if (byId) {
+      alert('Faculty ID already exists. Please use a unique ID.');
+      return;
+    }
+    const byName = allFaculty.some(f => f.name.trim().toLowerCase() === name.toLowerCase());
+    if (byName) {
+      alert('Faculty name already exists. Please use a unique name.');
+      return;
+    }
+
+    const newRecord: Faculty = {
+      id,
+      name,
+      designation,
+      department,
+      fid: formatFidDays(parseFidDays(newFacultyForm.fid)),
+      dutyCount: 0,
+      shortName: newFacultyForm.shortName.trim() || undefined,
+      unavailable: formatUnavailableDates(parseUnavailableDates(newFacultyForm.unavailable)) || undefined,
+      gender: newFacultyForm.gender || undefined,
+      facultyShift: newFacultyForm.facultyShift || undefined
+    };
+
+    const latest = getAllFaculty();
+    replaceFacultyData([...latest, newRecord]);
+    setDataVersion(v => v + 1);
+    setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
+    setSelectedFaculty(newRecord);
+    setIsEditingFaculty(false);
+    closeAddFacultyModal();
+    void syncBackupToBlob(['faculty']);
+  };
+
   const handleLogout = async () => {
     await fetch('/api/logout', { method: 'POST' });
     router.push('/login');
@@ -1640,19 +1783,104 @@ export default function DutyRoster() {
   };
 
   const downloadWord = () => {
-    if (!printRef.current) return;
-    const content = printRef.current.innerHTML;
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const formattedDate = formatRosterHeadingDate(selectedDate);
+    const title = `${course} ${semester} Exam ${year} (Under ${curriculum})`;
+    const shift1Rows = allocateInvigilators(rooms1);
+    const shift2Rows = allocateInvigilators(rooms2);
+
+    const renderShift = (
+      timeLabel: string,
+      supervisorName: string,
+      rows: Array<{ roomNo?: string; students?: string; assignedInvigilators: string[] }>
+    ) => {
+      const rowHtml = rows
+        .map((room) => {
+          const roomText = `${room.roomNo || ''}${room.students ? ` (${room.students})` : ''}` || '—';
+          const invigilators = Array.isArray(room.assignedInvigilators)
+            ? room.assignedInvigilators.map(toShortName).join(', ') || '—'
+            : '—';
+          return `<tr>
+  <td>${escapeHtml(roomText)}</td>
+  <td>${escapeHtml(invigilators)}</td>
+</tr>`;
+        })
+        .join('');
+
+      return `<div class="print-shift">
+  <div class="print-header">
+    <p class="print-title">${escapeHtml(title)}</p>
+    <p class="print-meta">Date: ${escapeHtml(formattedDate)}</p>
+    <p class="print-meta">Time: ${escapeHtml(timeLabel)}</p>
+    <p class="print-meta">Super: ${escapeHtml(supervisorName ? toShortName(supervisorName) : '—')}</p>
+  </div>
+  <table class="print-table">
+    <colgroup>
+      <col style="width:45mm" />
+      <col style="width:auto" />
+    </colgroup>
+    <thead>
+      <tr>
+        <th>Room No</th>
+        <th>Invigilators</th>
+      </tr>
+    </thead>
+    <tbody>${rowHtml}</tbody>
+  </table>
+</div>`;
+    };
+
+    const sections: string[] = [];
+    if (shiftMode !== 'afternoon') {
+      sections.push(renderShift(time1, super1, shift1Rows));
+    }
+    if (shiftMode !== 'forenoon') {
+      sections.push(renderShift(time2, super2, shift2Rows));
+    }
+
+    const content = `${sections.join('\n')}
+<div class="print-signature-row">
+  <table class="print-signature-table" role="presentation">
+    <tr>
+      <td class="print-signature-spacer"></td>
+      <td class="print-signature-cell">
+        <div class="print-signature-line"></div>
+        <p class="print-signature-primary">Principal</p>
+        <p class="print-signature-secondary">Victoria Institution (College)</p>
+      </td>
+    </tr>
+  </table>
+</div>`;
+
     const html = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
 <style>
   @page { size: A4; margin: 20mm; }
-  body { font-family: "Times New Roman", Times, serif; color: #000; }
-  table { width: 88%; margin: 0 auto 10px; border-collapse: collapse; table-layout: fixed; }
-  th, td { border: 1px solid #000; padding: 6px; text-align: left; }
-  th:first-child, td:first-child { width: 26%; }
-  td:last-child, th:last-child { word-break: break-word; white-space: normal; }
+  body { font-family: "Times New Roman", Times, serif; color: #000; margin: 0; }
+  .print-shift { margin: 0 0 36px 0; }
+  .print-header { text-align: center; margin: 0 0 12px 0; }
+  .print-title { font-size: 12pt; font-weight: 700; margin: 0 0 6px 0; }
+  .print-meta { font-size: 12pt; font-weight: 700; margin: 0 0 5px 0; }
+  .print-table { width: 170mm; margin: 0 auto 0 auto; border-collapse: collapse; table-layout: fixed; border: 1px solid #000; font-size: 11pt; }
+  .print-table th, .print-table td { border: 1px solid #000; padding: 6px; text-align: left; vertical-align: top; }
+  .print-table th { font-size: 12pt; font-weight: 700; }
+  .print-signature-row { width: 170mm; margin: 72px auto 0 auto; }
+  .print-signature-table { width: 170mm; border-collapse: collapse; table-layout: fixed; border: 0; }
+  .print-signature-table td { border: 0; padding: 0; }
+  .print-signature-spacer { width: 114mm; }
+  .print-signature-cell { width: 56mm; text-align: center; vertical-align: top; }
+  .print-signature-line { width: 56mm; border-top: 1px solid #000; margin: 96px 0 0 0; height: 0; }
+  .print-signature-primary { font-size: 12pt; font-weight: 700; margin: 8px 0 10px 0; }
+  .print-signature-secondary { font-size: 12pt; font-weight: 700; margin: 0; }
 </style>
 </head>
 <body>${content}</body>
@@ -1681,22 +1909,109 @@ export default function DutyRoster() {
   };
 
   const getPdfBlob = async (): Promise<Blob | null> => {
-    const canvas = await getPreviewCanvas();
-    if (!canvas) return null;
     const { jsPDF } = await import('jspdf');
-    const imgData = canvas.toDataURL('image/png');
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const imgWidth = pageWidth;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    const marginRight = 20;
+    const marginTop = 16;
+    const marginBottom = 18;
+    const tableWidth = 170;
+    const tableX = (pageWidth - tableWidth) / 2;
+    const roomColWidth = 45;
+    const invigilatorColWidth = tableWidth - roomColWidth;
+    let y = marginTop;
 
-    let position = 0;
-    while (position < imgHeight) {
-      pdf.addImage(imgData, 'PNG', 0, -position, imgWidth, imgHeight);
-      position += pageHeight;
-      if (position < imgHeight) pdf.addPage();
-    }
+    const examTitle = `${course} ${semester} Exam ${year} (Under ${curriculum})`;
+    const formattedDate = formatRosterHeadingDate(selectedDate);
+    const shift1Rows = allocateInvigilators(rooms1);
+    const shift2Rows = allocateInvigilators(rooms2);
+
+      const ensureSpace = (requiredHeight: number) => {
+        if (y + requiredHeight <= pageHeight - marginBottom) return;
+        pdf.addPage();
+        y = marginTop;
+      };
+
+    const drawCenteredLine = (text: string, fontSize = 12) => {
+        pdf.setFont('times', 'bold');
+        pdf.setFontSize(fontSize);
+        pdf.text(text, pageWidth / 2, y, { align: 'center' });
+        y += fontSize <= 11 ? 5 : 6;
+      };
+
+      const drawTableHeader = () => {
+        const rowHeight = 8;
+        pdf.setLineWidth(0.2);
+        pdf.rect(tableX, y, tableWidth, rowHeight);
+        pdf.line(tableX + roomColWidth, y, tableX + roomColWidth, y + rowHeight);
+        pdf.setFont('times', 'bold');
+        pdf.setFontSize(11);
+        pdf.text('Room No', tableX + 2, y + 5.5);
+        pdf.text('Invigilators', tableX + roomColWidth + 2, y + 5.5);
+        y += rowHeight;
+      };
+
+      const drawTableRows = (rows: Array<{ roomNo?: string; students?: string; assignedInvigilators: string[] }>) => {
+        drawTableHeader();
+        pdf.setFontSize(11);
+        rows.forEach((room) => {
+          const roomText = `${room.roomNo || ''}${room.students ? ` (${room.students})` : ''}` || '—';
+          const invigilatorsText = Array.isArray(room.assignedInvigilators)
+            ? room.assignedInvigilators.map(toShortName).join(', ') || '—'
+            : '—';
+          const invigilatorLines = pdf.splitTextToSize(invigilatorsText, invigilatorColWidth - 4) as string[];
+          const lineCount = Math.max(1, invigilatorLines.length);
+          const rowHeight = Math.max(8, lineCount * 5 + 2);
+
+          ensureSpace(rowHeight + 1);
+          if (y === marginTop) {
+            drawTableHeader();
+          }
+
+          pdf.rect(tableX, y, tableWidth, rowHeight);
+          pdf.line(tableX + roomColWidth, y, tableX + roomColWidth, y + rowHeight);
+          pdf.setFont('times', 'normal');
+          pdf.text(roomText, tableX + 2, y + 5.5);
+          pdf.text(invigilatorLines, tableX + roomColWidth + 2, y + 5.5);
+          y += rowHeight;
+        });
+      };
+
+      const drawShiftSection = (
+        timeLabel: string,
+        supervisorName: string,
+        rows: Array<{ roomNo?: string; students?: string; assignedInvigilators: string[] }>
+      ) => {
+        ensureSpace(44);
+        drawCenteredLine(examTitle, 12);
+        drawCenteredLine(`Date: ${formattedDate}`, 11);
+        drawCenteredLine(`Time: ${timeLabel}`, 11);
+        drawCenteredLine(`Super: ${supervisorName ? toShortName(supervisorName) : '—'}`, 11);
+        y += 2;
+        drawTableRows(rows);
+        y += 10;
+      };
+
+      if (shiftMode !== 'afternoon') {
+        drawShiftSection(time1, super1, shift1Rows || []);
+      }
+      if (shiftMode !== 'forenoon') {
+        drawShiftSection(time2, super2, shift2Rows || []);
+      }
+
+      ensureSpace(34);
+      y += 14; // Signature writing space
+      const lineWidth = 56;
+      const lineX = pageWidth - marginRight - lineWidth;
+      pdf.setLineWidth(0.2);
+      pdf.line(lineX, y, lineX + lineWidth, y);
+      y += 6;
+      pdf.setFont('times', 'bold');
+      pdf.setFontSize(12);
+      pdf.text('Principal', lineX + lineWidth / 2, y, { align: 'center' });
+      y += 6;
+      pdf.text('Victoria Institution (College)', lineX + lineWidth / 2, y, { align: 'center' });
 
     return pdf.output('blob');
   };
@@ -1708,7 +2023,14 @@ export default function DutyRoster() {
   };
 
   const downloadPdf = async () => {
-    const blob = await getPdfBlob();
+    let blob: Blob | null = null;
+    try {
+      blob = await getPdfBlob();
+    } catch (error) {
+      console.error('Vector PDF generation failed:', error);
+      alert('Failed to generate vector PDF. Please try again.');
+      return;
+    }
     if (!blob) return;
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1928,19 +2250,19 @@ export default function DutyRoster() {
         >
 
           {shiftMode !== 'afternoon' && (
-            <div className="mb-10">
-              <div className="text-center mb-4 space-y-1">
-                <p className="text-lg font-semibold">
-                  {course} {semester} Exam {year} ({curriculum})
+            <div className="print-shift mb-10">
+              <div className="print-header text-center mb-4 space-y-1">
+                <p className="print-title text-lg font-semibold">
+                  {course} {semester} Exam {year} (Under {curriculum})
                 </p>
-                <p className="text-base font-semibold">
-                  Date: {formatISODateLocal(selectedDate, 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', weekday: 'long' })}
+                <p className="print-meta text-base font-semibold">
+                  Date: {formatRosterHeadingDate(selectedDate)}
                 </p>
-                <p className="text-base font-semibold">Time: {time1}</p>
-                <p className="text-base font-semibold">Super: {super1 ? toShortName(super1) : '—'}</p>
+                <p className="print-meta text-base font-semibold">Time: {time1}</p>
+                <p className="print-meta text-base font-semibold">Super: {super1 ? toShortName(super1) : '—'}</p>
               </div>
               
-              <table className="w-[88%] mx-auto border-collapse border border-black table-fixed text-[15px]">
+              <table className="print-table w-[88%] mx-auto border-collapse border border-black table-fixed text-[15px]">
                 <thead>
                   <tr>
                     <th className="border border-black p-2 font-semibold text-left w-32">Room No</th>
@@ -1964,19 +2286,19 @@ export default function DutyRoster() {
           )}
 
           {shiftMode !== 'forenoon' && (
-            <div className="mb-10">
-              <div className="text-center mb-4 space-y-1">
-                <p className="text-lg font-semibold">
-                  {course} {semester} Exam {year} ({curriculum})
+            <div className="print-shift mb-10">
+              <div className="print-header text-center mb-4 space-y-1">
+                <p className="print-title text-lg font-semibold">
+                  {course} {semester} Exam {year} (Under {curriculum})
                 </p>
-                <p className="text-base font-semibold">
-                  Date: {formatISODateLocal(selectedDate, 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', weekday: 'long' })}
+                <p className="print-meta text-base font-semibold">
+                  Date: {formatRosterHeadingDate(selectedDate)}
                 </p>
-                <p className="text-base font-semibold">Time: {time2}</p>
-                <p className="text-base font-semibold">Super: {super2 ? toShortName(super2) : '—'}</p>
+                <p className="print-meta text-base font-semibold">Time: {time2}</p>
+                <p className="print-meta text-base font-semibold">Super: {super2 ? toShortName(super2) : '—'}</p>
               </div>
               
-              <table className="w-[88%] mx-auto border-collapse border border-black table-fixed text-[15px]">
+              <table className="print-table w-[88%] mx-auto border-collapse border border-black table-fixed text-[15px]">
                 <thead>
                   <tr>
                     <th className="border border-black p-2 font-semibold text-left w-32">Room No</th>
@@ -1999,11 +2321,12 @@ export default function DutyRoster() {
             </div>
           )}
 
-          <div className="mt-16 flex justify-end">
-            <div className="text-right">
-              <div className="w-56 border-t border-black pt-1"></div>
-              <p className="font-semibold mt-2">Principal</p>
-              <p className="font-semibold">Victoria Institution (College)</p>
+          <div className="print-signature-row mt-16 flex justify-end" style={{ width: '100%', textAlign: 'left' }}>
+            <div className="print-signature-block w-56 text-center" style={{ width: '14rem', marginLeft: 'auto', marginRight: 0, textAlign: 'center' }}>
+              <div className="print-signature-space" aria-hidden="true" style={{ height: '64px' }}></div>
+              <div className="print-signature-line border-t border-black pt-1" style={{ width: '100%', borderTop: '1px solid #000' }}></div>
+              <p className="print-signature-text font-semibold mt-2">Principal</p>
+              <p className="print-signature-text font-semibold">Victoria Institution (College)</p>
             </div>
           </div>
         </div>
@@ -2059,8 +2382,11 @@ export default function DutyRoster() {
                 >
                   <option value="light">Light</option>
                   <option value="dark">Dark</option>
+                  <option value="nord">Nord</option>
+                  <option value="forest">Forest</option>
                   <option value="solar">Solar</option>
                   <option value="cool">Cool</option>
+                  <option value="latte">Latte</option>
                 </select>
                 <button
                   onClick={handleLogout}
@@ -2401,8 +2727,11 @@ export default function DutyRoster() {
                 >
                   <option value="light">Light</option>
                   <option value="dark">Dark</option>
+                  <option value="nord">Nord</option>
+                  <option value="forest">Forest</option>
                   <option value="solar">Solar</option>
                   <option value="cool">Cool</option>
+                  <option value="latte">Latte</option>
                 </select>
                 <button
                   onClick={handleLogout}
@@ -2475,6 +2804,13 @@ export default function DutyRoster() {
               <span className="font-medium">
                 Showing {filteredFaculty.length} of {allFaculty.length} faculty members
               </span>
+              <button
+                onClick={openAddFacultyModal}
+                className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors font-medium text-sm"
+              >
+                <Plus size={16} />
+                Add Faculty
+              </button>
             </div>
           </div>
 
@@ -2516,6 +2852,221 @@ export default function DutyRoster() {
             ))}
           </div>
         </div>
+
+        {isAddFacultyOpen && (
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={closeAddFacultyModal}
+          >
+            <div className="theme-card rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white p-6 rounded-t-2xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold">Add New Faculty</h2>
+                    <p className="text-blue-100 mt-1">Enter all required profile and availability details</p>
+                  </div>
+                  <button
+                    onClick={closeAddFacultyModal}
+                    className="text-white/80 hover:text-white transition-colors"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-slate-600 mb-1">Faculty ID *</label>
+                    <input
+                      type="text"
+                      value={newFacultyForm.id}
+                      onChange={(e) => setNewFacultyForm(v => ({ ...v, id: e.target.value }))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                      placeholder="e.g., ENG-104"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-600 mb-1">Full Name *</label>
+                    <input
+                      type="text"
+                      value={newFacultyForm.name}
+                      onChange={(e) => setNewFacultyForm(v => ({ ...v, name: e.target.value }))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                      placeholder="e.g., Ananya Das"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-600 mb-1">Department *</label>
+                    <input
+                      type="text"
+                      value={newFacultyForm.department}
+                      onChange={(e) => setNewFacultyForm(v => ({ ...v, department: e.target.value }))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                      placeholder="e.g., English"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-600 mb-1">Designation *</label>
+                    <input
+                      type="text"
+                      value={newFacultyForm.designation}
+                      onChange={(e) => setNewFacultyForm(v => ({ ...v, designation: e.target.value }))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                      placeholder="e.g., Assistant Professor"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-600 mb-1">Short Name</label>
+                    <input
+                      type="text"
+                      value={newFacultyForm.shortName}
+                      onChange={(e) => setNewFacultyForm(v => ({ ...v, shortName: e.target.value }))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                      placeholder="e.g., Ananya D"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-600 mb-1">Gender</label>
+                    <select
+                      value={newFacultyForm.gender}
+                      onChange={(e) => setNewFacultyForm(v => ({ ...v, gender: e.target.value as '' | 'Male' | 'Female' }))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                    >
+                      <option value="">Unspecified</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                    </select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs text-slate-600 mb-1">Faculty Shift</label>
+                    <select
+                      value={newFacultyForm.facultyShift}
+                      onChange={(e) => setNewFacultyForm(v => ({ ...v, facultyShift: e.target.value as '' | 'Morning' | 'Day' }))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                    >
+                      <option value="">Unspecified</option>
+                      <option value="Morning">Morning</option>
+                      <option value="Day">Day</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="theme-panel border border-slate-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-blue-600 font-medium mb-2">
+                    <Clock size={18} />
+                    Faculty Improvement Day (FID)
+                  </div>
+                  <details className="rounded-lg border border-slate-300 bg-white px-3 py-2">
+                    <summary className="cursor-pointer list-none text-sm text-slate-800 flex items-center justify-between">
+                      <span>
+                        {parseFidDays(newFacultyForm.fid).length > 0
+                          ? formatFidDays(parseFidDays(newFacultyForm.fid))
+                          : 'Select FID weekdays'}
+                      </span>
+                      <ChevronDown size={16} className="text-slate-500" />
+                    </summary>
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {WEEKDAY_OPTIONS.map(option => {
+                        const isSelected = parseFidDays(newFacultyForm.fid).includes(option.value);
+                        return (
+                          <label
+                            key={`new-fid-option-${option.value}`}
+                            className="flex items-center justify-between px-2.5 py-2 rounded-md border border-slate-200 hover:border-blue-300 cursor-pointer"
+                          >
+                            <span className="text-sm text-slate-700">{option.label}</span>
+                            <span className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleNewFacultyFidDay(option.value)}
+                                className="h-4 w-4 accent-blue-600"
+                              />
+                              {isSelected && <Check size={14} className="text-blue-600" />}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </details>
+                </div>
+
+                <div className="theme-panel rounded-lg p-4">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Unavailable Dates</label>
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          ref={newUnavailableDateInputRef}
+                          type="date"
+                          value={newUnavailableDateInput}
+                          onChange={(e) => setNewUnavailableDateInput(e.target.value)}
+                          className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-lg text-sm no-native-calendar-icon"
+                          style={{ colorScheme: theme === 'dark' || theme === 'nord' || theme === 'forest' ? 'dark' : 'light' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => newUnavailableDateInputRef.current?.showPicker?.()}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-blue-600"
+                          aria-label="Open calendar"
+                        >
+                          <Calendar size={14} />
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={addNewFacultyUnavailableDate}
+                        className="px-3 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium"
+                      >
+                        Add
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {parseUnavailableDates(newFacultyForm.unavailable).length === 0 ? (
+                        <span className="text-xs text-slate-500">No blocked dates selected</span>
+                      ) : (
+                        parseUnavailableDates(newFacultyForm.unavailable).map((dateValue) => (
+                          <span
+                            key={`new-unavailable-${dateValue}`}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium"
+                          >
+                            {new Date(`${dateValue}T00:00:00`).toLocaleDateString('en-GB', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric'
+                            })}
+                            <button
+                              type="button"
+                              onClick={() => removeNewFacultyUnavailableDate(dateValue)}
+                              className="text-amber-700 hover:text-amber-900"
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2">
+                  <button
+                    onClick={closeAddFacultyModal}
+                    className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveNewFaculty}
+                    className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-sm font-semibold"
+                  >
+                    Save Faculty
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {selectedFaculty && (
           <div
@@ -2711,7 +3262,7 @@ export default function DutyRoster() {
                                 value={unavailableDateInput}
                                 onChange={(e) => setUnavailableDateInput(e.target.value)}
                                 className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-lg text-sm no-native-calendar-icon"
-                                style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }}
+                                style={{ colorScheme: theme === 'dark' || theme === 'nord' || theme === 'forest' ? 'dark' : 'light' }}
                               />
                               <button
                                 type="button"
@@ -2884,8 +3435,11 @@ export default function DutyRoster() {
                 >
                   <option value="light">Light</option>
                   <option value="dark">Dark</option>
+                  <option value="nord">Nord</option>
+                  <option value="forest">Forest</option>
                   <option value="solar">Solar</option>
                   <option value="cool">Cool</option>
+                  <option value="latte">Latte</option>
                 </select>
                 <button
                   onClick={handleLogout}
@@ -2940,21 +3494,21 @@ export default function DutyRoster() {
                       
                       <div className="space-y-3">
                         <div>
-                          <span className="inline-block px-2 py-1 bg-blue-100 text-blue-800 text-xs font-semibold rounded mb-1">
+                          <span className="quickstart-badge quickstart-badge-what inline-block px-2 py-1 text-xs font-semibold rounded mb-1">
                             WHAT
                           </span>
                           <p className="text-sm text-slate-700">{item.what}</p>
                         </div>
                         
                         <div>
-                          <span className="inline-block px-2 py-1 bg-emerald-100 text-emerald-800 text-xs font-semibold rounded mb-1">
+                          <span className="quickstart-badge quickstart-badge-how inline-block px-2 py-1 text-xs font-semibold rounded mb-1">
                             HOW
                           </span>
                           <p className="text-sm text-slate-700">{item.how}</p>
                         </div>
                         
                         <div>
-                          <span className="inline-block px-2 py-1 bg-amber-100 text-amber-800 text-xs font-semibold rounded mb-1">
+                          <span className="quickstart-badge quickstart-badge-why inline-block px-2 py-1 text-xs font-semibold rounded mb-1">
                             WHY
                           </span>
                           <p className="text-sm text-slate-700">{item.why}</p>
@@ -3176,13 +3730,13 @@ export default function DutyRoster() {
           </section>
 
           {/* Glossary */}
-          <section className="theme-card rounded-2xl p-8 border border-indigo-200/40">
+          <section className="theme-card glossary-section rounded-2xl p-8 border">
             <h2 className="text-2xl font-bold text-slate-900 mb-6">Glossary of Terms</h2>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {ABOUT_SECTIONS.glossary.map((item) => (
-                <div key={item.term} className="theme-panel rounded-lg p-4 border border-indigo-100">
-                  <h3 className="font-bold text-indigo-900 text-sm mb-1">{item.term}</h3>
+                <div key={item.term} className="theme-panel glossary-item rounded-lg p-4 border">
+                  <h3 className="glossary-term font-bold text-sm mb-1">{item.term}</h3>
                   <p className="text-sm text-slate-700">{item.definition}</p>
                 </div>
               ))}
@@ -3267,8 +3821,11 @@ export default function DutyRoster() {
               >
                 <option value="light">Light</option>
                 <option value="dark">Dark</option>
+                <option value="nord">Nord</option>
+                <option value="forest">Forest</option>
                 <option value="solar">Solar</option>
                 <option value="cool">Cool</option>
+                <option value="latte">Latte</option>
               </select>
               <button
                 onClick={handleLogout}
@@ -3283,7 +3840,7 @@ export default function DutyRoster() {
 
       <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-8">
         <div className="theme-card rounded-xl shadow-sm p-6 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Exam Date</label>
               <input
@@ -3310,6 +3867,27 @@ export default function DutyRoster() {
                 onChange={(e) => setSemester(e.target.value)}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Year of Exam</label>
+              <input
+                type="text"
+                value={year}
+                onChange={(e) => setYear(e.target.value)}
+                placeholder="e.g., 2025"
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Curriculum</label>
+              <select
+                value={curriculum}
+                onChange={(e) => setCurriculum(e.target.value as 'CCF' | 'CBCS')}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              >
+                <option value="CCF">CCF</option>
+                <option value="CBCS">CBCS</option>
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Shift Mode</label>
@@ -3407,10 +3985,31 @@ export default function DutyRoster() {
 
           <div className="space-y-6">
             <div className="theme-card rounded-xl shadow-sm p-6 lg:sticky lg:top-24">
-              <h2 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
-                <Users size={20} />
-                Available Faculty ({sortedEligibleFaculty.length})
-              </h2>
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <h2 className="font-bold text-slate-900 flex items-center gap-2">
+                  <Users size={20} />
+                  Available Faculty ({visibleAvailableFaculty.length})
+                </h2>
+                <button
+                  onClick={() => setAvailableSearchOpen(v => !v)}
+                  className="inline-flex items-center justify-center p-2 rounded-lg border border-slate-300 text-slate-600 hover:text-blue-700 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                  title="Search available faculty"
+                  aria-label="Search available faculty"
+                >
+                  <Search size={16} />
+                </button>
+              </div>
+              {availableSearchOpen && (
+                <div className="mb-3">
+                  <input
+                    type="text"
+                    value={availableSearchTerm}
+                    onChange={(e) => setAvailableSearchTerm(e.target.value)}
+                    placeholder="Search by name, department, designation, ID..."
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  />
+                </div>
+              )}
               
               <div className="text-sm text-slate-600 mb-4">
                 Faculty available on {formatISODateLocal(selectedDate, 'en-GB', { weekday: 'long', month: 'short', day: 'numeric' })}
@@ -3442,6 +4041,7 @@ export default function DutyRoster() {
                     <option value="designation">Designation</option>
                     <option value="dutyCount">Duty Count</option>
                     <option value="fid">FID</option>
+                    <option value="shift">Shift</option>
                   </select>
                 </div>
                 <div>
@@ -3463,16 +4063,16 @@ export default function DutyRoster() {
                     Assign invigilators directly from each room slot dropdown.
                   </div>
                 )}
-                {sortedEligibleFaculty.length === 0 ? (
+                {visibleAvailableFaculty.length === 0 ? (
                   <p className="text-center py-8 text-slate-500">No faculty available for this date</p>
                 ) : (
                   <>
-                    {sortedEligibleFaculty.map(faculty => (
+                    {visibleAvailableFaculty.map(faculty => (
                       <div
                         key={`avail-${faculty.id}`}
                         draggable={!isCompactScreen}
                         onDragStart={(e) => handleDragStart(e, { type: 'faculty', facultyName: faculty.name })}
-                        className={`theme-panel px-4 py-3 rounded-xl transition-all group border border-slate-200 hover:border-blue-300 hover:bg-slate-50/50 ${isCompactScreen ? '' : 'cursor-move'}`}
+                        className={`theme-panel available-faculty-card px-4 py-3 rounded-xl transition-all group border border-slate-200 ${isCompactScreen ? '' : 'cursor-move'}`}
                       >
                         <div className="flex items-start gap-3">
                           <GripVertical size={15} className="mt-1 text-slate-400 group-hover:text-blue-500" />
@@ -3641,7 +4241,7 @@ function ShiftCard({
             </div>
           )}
           {showSupervisorShift2Warning && (
-            <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
+            <div className="duty-warning mt-2 flex items-center gap-1.5 text-xs rounded-md px-2.5 py-1.5">
               <AlertCircle size={13} />
               Morning teacher selected for Shift 2 (Afternoon).
             </div>
@@ -3663,7 +4263,7 @@ function ShiftCard({
             roomAssignedFaculty.length === room.slots.length &&
             roomAssignedFaculty.every(f => f.gender === 'Male');
           return (
-          <div key={room.id} className="border-2 border-slate-200 rounded-lg p-4 hover:border-blue-300 transition-colors bg-slate-50/50">
+          <div key={room.id} className="room-card border-2 rounded-lg p-4 transition-colors">
             <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-4">
               <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
@@ -3714,7 +4314,7 @@ function ShiftCard({
               </button>
             </div>
             {allRoomInvigilatorsMale && (
-              <div className="mb-4 flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              <div className="duty-warning mb-4 flex items-center gap-2 text-xs rounded-md px-3 py-2">
                 <AlertCircle size={13} />
                 All invigilators in this room are male. Please assign at least one female teacher.
               </div>
@@ -3786,14 +4386,14 @@ function ShiftCard({
                           e.stopPropagation();
                           removeFromSlot(room.id, slot.id);
                         }}
-                        className="text-red-500 hover:text-red-700 hover:bg-red-100 p-1 rounded transition-colors"
+                        className="slot-remove-btn p-1 rounded transition-colors"
                       >
                         <X size={16} />
                       </button>
                     )}
                   </div>
                   {slot.facultyName && showShift2Warning && (
-                    <div className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
+                    <div className="duty-warning mt-2 flex items-center gap-1.5 text-[11px] rounded-md px-2 py-1">
                       <AlertCircle size={12} />
                       Morning teacher selected for Shift 2 (Afternoon).
                     </div>
@@ -3809,7 +4409,7 @@ function ShiftCard({
         <div className="pt-2 flex justify-end">
           <button
             onClick={addRoom}
-            className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-sm font-medium transition-colors"
+            className="add-room-btn w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
           >
             <Plus size={16} />
             Add Room
@@ -3819,3 +4419,5 @@ function ShiftCard({
     </div>
   );
 }
+
+
