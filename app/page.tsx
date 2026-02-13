@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { Calendar, Users, Printer, Trash2, Plus, Search, Filter, X, ChevronDown, Clock, Building2, UserCircle2, AlertCircle, ClipboardList, DoorOpen, UserCheck, GripVertical, History, LayoutDashboard, TrendingUp, Share2, Copy, Check, Info } from 'lucide-react';
 import facultyData from '@/lib/faculty-data.json';
 import { Faculty, Room, InvigilatorSlot, DragItem, DutyAssignment, ShiftData } from '@/lib/types';
@@ -456,7 +456,6 @@ const isCloudTimestampNewer = (cloudTs?: string, localTs?: string) => {
 
 export default function DutyRoster() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [viewMode, setViewMode] = useState<ViewMode>('roster');
   
   // Faculty Directory states
@@ -645,11 +644,13 @@ export default function DutyRoster() {
 
   // Initialize faculty data and load saved assignment
   useEffect(() => {
-    const tab = searchParams.get('tab');
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
     if (tab === 'dashboard' || tab === 'roster' || tab === 'directory' || tab === 'about') {
       setViewMode(tab);
     }
-  }, [searchParams]);
+  }, []);
 
   useEffect(() => {
     initializeFacultyData(facultyData as Faculty[]);
@@ -3027,7 +3028,7 @@ export default function DutyRoster() {
           </section>
 
           {/* Best Practices */}
-          <section className="theme-card rounded-2xl p-8 border border-amber-200/40 bg-gradient-to-br from-amber-50 to-orange-50">
+          <section className="theme-card rounded-2xl p-8 border border-amber-300/40">
             <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
               <TrendingUp size={24} className="text-amber-600" />
               Best Practices for Duty Management
@@ -3036,12 +3037,12 @@ export default function DutyRoster() {
             
             <div className="space-y-4">
               {ABOUT_SECTIONS.bestPractices.map((practice, idx) => (
-                <div key={idx} className="theme-panel rounded-lg p-5 border border-amber-200">
+                <div key={idx} className="theme-panel rounded-lg p-5 border border-amber-300/40">
                   <div className="flex gap-3">
                     <div className="h-8 w-8 rounded-full bg-amber-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-sm">
                       {idx + 1}
                     </div>
-                    <p className="text-sm text-slate-800 leading-relaxed pt-1">{practice}</p>
+                    <p className="text-sm text-slate-700 leading-relaxed pt-1">{practice}</p>
                   </div>
                 </div>
               ))}
@@ -3058,8 +3059,8 @@ export default function DutyRoster() {
             
             <div className="space-y-4">
               {ABOUT_SECTIONS.troubleshooting.map((item, idx) => (
-                <div key={idx} className="theme-panel rounded-lg p-5 border border-red-100">
-                  <h3 className="font-bold text-red-900 mb-2 flex items-center gap-2">
+                <div key={idx} className="theme-panel rounded-lg p-5 border border-red-300/40">
+                  <h3 className="font-bold text-slate-900 mb-2 flex items-center gap-2">
                     <span className="h-6 w-6 rounded-full bg-red-100 text-red-700 text-xs flex items-center justify-center">
                       ?
                     </span>
