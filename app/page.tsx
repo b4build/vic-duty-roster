@@ -74,6 +74,42 @@ const parseUnavailableDates = (value: string): string[] => {
 };
 
 const formatUnavailableDates = (dates: string[]) => Array.from(new Set(dates)).sort().join(', ');
+const parseISODateLocal = (value: string): Date | null => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!year || !month || !day) return null;
+  // Noon avoids DST edge-case shifts around midnight.
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
+};
+
+const formatISODateLocal = (
+  value: string,
+  locale: string,
+  options?: Intl.DateTimeFormatOptions
+): string => {
+  const date = parseISODateLocal(value);
+  if (!date) return value;
+  return date.toLocaleDateString(locale, options);
+};
+
+const normalizeFacultyShift = (value: unknown): '' | 'Morning' | 'Day' => {
+  if (typeof value !== 'string') return '';
+  const raw = value.trim().toLowerCase();
+  if (!raw) return '';
+  if (raw === 'morning' || raw === 'forenoon' || raw === 'am') return 'Morning';
+  if (raw === 'day' || raw === 'afternoon' || raw === 'pm') return 'Day';
+  return '';
+};
+
+const getFacultyShiftLabel = (faculty?: Faculty | null): '' | 'Morning' | 'Day' =>
+  normalizeFacultyShift(faculty?.facultyShift);
+
+const isMorningFaculty = (faculty?: Faculty | null): boolean =>
+  getFacultyShiftLabel(faculty) === 'Morning';
+
 const ABOUT_SECTIONS = {
   quickStart: [
     {
@@ -469,7 +505,8 @@ export default function DutyRoster() {
     fid: '',
     shortName: '',
     unavailable: '',
-    gender: '' as '' | 'Male' | 'Female'
+    gender: '' as '' | 'Male' | 'Female',
+    facultyShift: '' as '' | 'Morning' | 'Day'
   });
   const [unavailableDateInput, setUnavailableDateInput] = useState('');
   const [directorySortBy, setDirectorySortBy] = useState<FacultySortBy>('name');
@@ -494,6 +531,11 @@ export default function DutyRoster() {
   });
   const unavailableDateInputRef = useRef<HTMLInputElement | null>(null);
   const allFaculty = useMemo(() => getAllFaculty(), [dataVersion]);
+  const facultyByName = useMemo(() => {
+    const map = new Map<string, Faculty>();
+    allFaculty.forEach(f => map.set(f.name, f));
+    return map;
+  }, [allFaculty]);
   const printRef = useRef<HTMLDivElement | null>(null);
 
   const syncBackupToBlob = async (sections: BackupSection[] = ['duties', 'history', 'faculty']) => {
@@ -654,6 +696,8 @@ export default function DutyRoster() {
 
   useEffect(() => {
     initializeFacultyData(facultyData as Faculty[]);
+    // Refresh memoized faculty reads after localStorage bootstrap.
+    setDataVersion(v => v + 1);
     const filtered = getAvailableFacultyByDate(selectedDate, getAllFaculty());
     setAvailableFaculty(filtered);
     
@@ -777,7 +821,8 @@ export default function DutyRoster() {
   };
 
   const getAvailableFacultyByDate = (dateValue: string, source: Faculty[]) => {
-    const date = new Date(dateValue);
+    const date = parseISODateLocal(dateValue);
+    if (!date) return source;
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
     return source.filter(f => {
       const unavailableDates = parseUnavailableDates(f.unavailable || '');
@@ -938,7 +983,7 @@ export default function DutyRoster() {
       ['Mon', 0], ['Tue', 0], ['Wed', 0], ['Thu', 0], ['Fri', 0], ['Sat', 0], ['Sun', 0]
     ]);
     allHistory.forEach(item => {
-      const day = new Date(item.date).toLocaleDateString('en-US', { weekday: 'short' });
+      const day = formatISODateLocal(item.date, 'en-US', { weekday: 'short' });
       map.set(day, (map.get(day) || 0) + 1);
     });
     return map;
@@ -1420,7 +1465,8 @@ export default function DutyRoster() {
       fid: formatFidDays(fidDays),
       shortName: selectedFaculty.shortName || '',
       unavailable: formatUnavailableDates(unavailableDates),
-      gender: selectedFaculty.gender || ''
+      gender: selectedFaculty.gender || '',
+      facultyShift: getFacultyShiftLabel(selectedFaculty)
     });
     setUnavailableDateInput('');
     setIsEditingFaculty(true);
@@ -1443,7 +1489,8 @@ export default function DutyRoster() {
       fid: formatFidDays(parseFidDays(facultyEdit.fid)),
       shortName: facultyEdit.shortName.trim() || undefined,
       unavailable: formatUnavailableDates(parseUnavailableDates(facultyEdit.unavailable)) || undefined,
-      gender: facultyEdit.gender || undefined
+      gender: facultyEdit.gender || undefined,
+      facultyShift: facultyEdit.facultyShift || undefined
     });
     if (!updated) {
       alert('Failed to update faculty record.');
@@ -1546,6 +1593,9 @@ export default function DutyRoster() {
         }
         const id = String(item?.id || `${department.toUpperCase().slice(0, 4)}-${idx + 1}`);
         const dutyCount = Number.isFinite(Number(item?.dutyCount)) ? Number(item?.dutyCount) : 0;
+        const facultyShift = normalizeFacultyShift(
+          item?.facultyShift ?? item?.shift ?? item?.teacherShift ?? item?.dutyShift ?? item?.session
+        );
         return {
           id,
           name,
@@ -1555,7 +1605,8 @@ export default function DutyRoster() {
           unavailable: String(item?.unavailable || '').trim(),
           shortName: String(item?.shortName || '').trim() || undefined,
           dutyCount,
-          gender: item?.gender === 'Male' || item?.gender === 'Female' ? item.gender : undefined
+          gender: item?.gender === 'Male' || item?.gender === 'Female' ? item.gender : undefined,
+          facultyShift: facultyShift || undefined
         };
       });
 
@@ -1668,7 +1719,7 @@ export default function DutyRoster() {
     URL.revokeObjectURL(url);
   };
 
-  const shareMessage = `VIC Duty Roster - ${new Date(selectedDate).toLocaleDateString('en-GB', {
+  const shareMessage = `VIC Duty Roster - ${formatISODateLocal(selectedDate, 'en-GB', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -1684,7 +1735,7 @@ export default function DutyRoster() {
         : assignment.shiftMode === 'forenoon'
           ? 'Forenoon'
           : 'Afternoon';
-    return `VIC Duty Roster - ${new Date(date).toLocaleDateString('en-GB', {
+    return `VIC Duty Roster - ${formatISODateLocal(date, 'en-GB', {
       day: '2-digit',
       month: 'short',
       year: 'numeric',
@@ -1882,7 +1933,7 @@ export default function DutyRoster() {
                   {course} {semester} Exam {year} ({curriculum})
                 </p>
                 <p className="text-base font-semibold">
-                  Date: {new Date(selectedDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', weekday: 'long' })}
+                  Date: {formatISODateLocal(selectedDate, 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', weekday: 'long' })}
                 </p>
                 <p className="text-base font-semibold">Time: {time1}</p>
                 <p className="text-base font-semibold">Super: {super1 ? toShortName(super1) : '—'}</p>
@@ -1918,7 +1969,7 @@ export default function DutyRoster() {
                   {course} {semester} Exam {year} ({curriculum})
                 </p>
                 <p className="text-base font-semibold">
-                  Date: {new Date(selectedDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', weekday: 'long' })}
+                  Date: {formatISODateLocal(selectedDate, 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', weekday: 'long' })}
                 </p>
                 <p className="text-base font-semibold">Time: {time2}</p>
                 <p className="text-base font-semibold">Super: {super2 ? toShortName(super2) : '—'}</p>
@@ -2073,7 +2124,7 @@ export default function DutyRoster() {
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                           <div>
                               <div className="font-semibold text-slate-900">
-                                {new Date(item.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', weekday: 'short' })}
+                                {formatISODateLocal(item.date, 'en-GB', { day: '2-digit', month: 'short', year: 'numeric', weekday: 'short' })}
                               </div>
                               <div className="text-xs text-slate-600 mt-1">
                                 Shift: {item.shiftMode === 'both' ? 'Both' : item.shiftMode === 'forenoon' ? 'Forenoon' : 'Afternoon'}
@@ -2637,6 +2688,18 @@ export default function DutyRoster() {
                         </select>
                       </div>
                       <div>
+                        <label className="block text-xs text-slate-600 mb-1">Faculty Shift</label>
+                        <select
+                          value={facultyEdit.facultyShift}
+                          onChange={(e) => setFacultyEdit(v => ({ ...v, facultyShift: e.target.value as '' | 'Morning' | 'Day' }))}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        >
+                          <option value="">Unspecified</option>
+                          <option value="Morning">Morning</option>
+                          <option value="Day">Day</option>
+                        </select>
+                      </div>
+                      <div>
                         <label className="block text-xs text-slate-600 mb-1">Unavailable</label>
                         <div className="space-y-2">
                           <div className="flex gap-2">
@@ -2705,6 +2768,10 @@ export default function DutyRoster() {
                           <div className="text-slate-500">Gender</div>
                           <div className="text-slate-900 font-medium">{selectedFaculty.gender || 'Unspecified'}</div>
                         </div>
+                        <div>
+                          <div className="text-slate-500">Faculty Shift</div>
+                          <div className="text-slate-900 font-medium">{getFacultyShiftLabel(selectedFaculty) || 'Unspecified'}</div>
+                        </div>
                       </div>
                       <div>
                         <div className="text-slate-500 text-sm mb-1">Unavailable Dates</div>
@@ -2749,7 +2816,7 @@ export default function DutyRoster() {
                         <div key={history.id} className="text-sm theme-card rounded p-2 border border-slate-200">
                           <div className="flex justify-between">
                             <span className="font-semibold text-slate-700">
-                              {new Date(history.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              {formatISODateLocal(history.date, 'en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                             </span>
                             <span className="text-slate-600">
                               Shift {history.shift} - {history.role === 'supervisor' ? 'Supervisor' : `Room ${history.roomNo}`}
@@ -3282,6 +3349,7 @@ export default function DutyRoster() {
                 assignedFaculty={takenByShift1}
                 compactMode={isCompactScreen}
                 slotFacultyOptions={slotOptions1}
+                facultyByName={facultyByName}
               />
             )}
 
@@ -3307,6 +3375,7 @@ export default function DutyRoster() {
                 assignedFaculty={takenByShift2}
                 compactMode={isCompactScreen}
                 slotFacultyOptions={slotOptions2}
+                facultyByName={facultyByName}
               />
             )}
 
@@ -3343,7 +3412,7 @@ export default function DutyRoster() {
               </h2>
               
               <div className="text-sm text-slate-600 mb-4">
-                Faculty available on {new Date(selectedDate).toLocaleDateString('en-GB', { weekday: 'long', month: 'short', day: 'numeric' })}
+                Faculty available on {formatISODateLocal(selectedDate, 'en-GB', { weekday: 'long', month: 'short', day: 'numeric' })}
               </div>
 
               <div className="flex items-center justify-between mb-3">
@@ -3411,8 +3480,15 @@ export default function DutyRoster() {
                               <div className="font-medium text-slate-900 text-sm group-hover:text-blue-600">
                                 {faculty.name}
                               </div>
-                              <div className="text-[11px] font-semibold text-slate-600 bg-slate-200/70 px-2 py-0.5 rounded-full">
-                                Duties {faculty.dutyCount || 0}
+                              <div className="flex items-center gap-2">
+                                {getFacultyShiftLabel(faculty) && (
+                                  <div className="text-[11px] font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                                    {getFacultyShiftLabel(faculty)}
+                                  </div>
+                                )}
+                                <div className="text-[11px] font-semibold text-slate-600 bg-slate-200/70 px-2 py-0.5 rounded-full">
+                                  Duties {faculty.dutyCount || 0}
+                                </div>
                               </div>
                             </div>
                             <div className="text-xs text-slate-600 mt-1">{faculty.department}</div>
@@ -3479,7 +3555,8 @@ function ShiftCard({
   removeFromSlot,
   assignedFaculty,
   compactMode,
-  slotFacultyOptions
+  slotFacultyOptions,
+  facultyByName
 }: {
   shiftNumber: number;
   title: string;
@@ -3501,9 +3578,13 @@ function ShiftCard({
   assignedFaculty: Set<string>;
   compactMode: boolean;
   slotFacultyOptions: Faculty[];
+  facultyByName: Map<string, Faculty>;
 }) {
   const totalSlots = rooms.reduce((sum, r) => sum + r.slots.length, 0);
   const filledSlots = rooms.reduce((sum, r) => sum + r.slots.filter(s => s.facultyName).length, 0);
+  const selectedSupervisor = supervisor ? facultyByName.get(supervisor) : undefined;
+  const supervisorShiftLabel = getFacultyShiftLabel(selectedSupervisor);
+  const showSupervisorShift2Warning = shiftNumber === 2 && isMorningFaculty(selectedSupervisor);
 
   return (
     <div className="theme-card rounded-xl shadow-sm p-6">
@@ -3538,9 +3619,22 @@ function ShiftCard({
           >
             <option value="">Select Supervisor</option>
             {availableSupervisors.map(f => (
-              <option key={f.id} value={f.name}>{f.name}</option>
+              <option key={f.id} value={f.name}>
+                {f.name}{getFacultyShiftLabel(f) ? ` (${getFacultyShiftLabel(f)})` : ''}
+              </option>
             ))}
           </select>
+          {supervisor && supervisorShiftLabel && (
+            <div className="mt-2 text-xs text-slate-600">
+              Selected supervisor shift: <span className="font-semibold">{supervisorShiftLabel}</span>
+            </div>
+          )}
+          {showSupervisorShift2Warning && (
+            <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
+              <AlertCircle size={13} />
+              Morning teacher selected for Shift 2 (Afternoon).
+            </div>
+          )}
         </div>
       </div>
 
@@ -3549,7 +3643,15 @@ function ShiftCard({
           <h3 className="font-semibold text-slate-900">Examination Rooms</h3>
         </div>
 
-        {rooms.map((room) => (
+        {rooms.map((room) => {
+          const roomAssignedFaculty = room.slots
+            .map(slot => (slot.facultyName ? facultyByName.get(slot.facultyName) : undefined))
+            .filter((f): f is Faculty => Boolean(f));
+          const allRoomInvigilatorsMale =
+            room.slots.length > 0 &&
+            roomAssignedFaculty.length === room.slots.length &&
+            roomAssignedFaculty.every(f => f.gender === 'Male');
+          return (
           <div key={room.id} className="border-2 border-slate-200 rounded-lg p-4 hover:border-blue-300 transition-colors bg-slate-50/50">
             <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-4">
               <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -3600,11 +3702,21 @@ function ShiftCard({
                 <Trash2 size={18} />
               </button>
             </div>
+            {allRoomInvigilatorsMale && (
+              <div className="mb-4 flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                <AlertCircle size={13} />
+                All invigilators in this room are male. Please assign at least one female teacher.
+              </div>
+            )}
 
             {/* Invigilator Slots */}
             <div className="space-y-2">
               <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Invigilator Slots</div>
-              {room.slots.map((slot, idx) => (
+              {room.slots.map((slot, idx) => {
+                const selectedFaculty = slot.facultyName ? facultyByName.get(slot.facultyName) : undefined;
+                const slotShiftLabel = getFacultyShiftLabel(selectedFaculty);
+                const showShift2Warning = shiftNumber === 2 && isMorningFaculty(selectedFaculty);
+                return (
                 <div
                   key={slot.id}
                   onDragOver={onDragOver}
@@ -3629,7 +3741,7 @@ function ShiftCard({
                           <option value="">Select Invigilator</option>
                           {slotFacultyOptions.map(f => (
                             <option key={`slot-option-${room.id}-${slot.id}-${f.id}`} value={f.name}>
-                              {f.name}
+                              {f.name}{getFacultyShiftLabel(f) ? ` (${getFacultyShiftLabel(f)})` : ''}
                             </option>
                           ))}
                         </select>
@@ -3647,6 +3759,11 @@ function ShiftCard({
                         >
                           <GripVertical size={14} className="text-blue-400" />
                           <span className="slot-name font-medium text-sm">{slot.facultyName}</span>
+                          {slotShiftLabel && (
+                            <span className="text-[11px] font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                              {slotShiftLabel}
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <span className="slot-placeholder text-sm italic">Drag faculty here...</span>
@@ -3664,11 +3781,19 @@ function ShiftCard({
                       </button>
                     )}
                   </div>
+                  {slot.facultyName && showShift2Warning && (
+                    <div className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
+                      <AlertCircle size={12} />
+                      Morning teacher selected for Shift 2 (Afternoon).
+                    </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
-        ))}
+          );
+        })}
 
         <div className="pt-2 flex justify-end">
           <button

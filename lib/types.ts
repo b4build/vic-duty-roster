@@ -10,6 +10,7 @@ export interface Faculty {
   shortName?: string;
   unavailable?: string;
   gender?: 'Male' | 'Female';
+  facultyShift?: 'Morning' | 'Day';
 }
 
 export interface DutyHistory {
