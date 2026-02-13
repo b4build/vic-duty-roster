@@ -234,6 +234,16 @@
   opacity: 1;
 }
 
+.theme-root .no-native-calendar-icon::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  display: none;
+}
+
+.theme-root .no-native-calendar-icon::-webkit-clear-button,
+.theme-root .no-native-calendar-icon::-webkit-inner-spin-button {
+  display: none;
+}
+
 @layer base {
   * {
     @apply border-slate-200;

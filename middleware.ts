@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { AUTH_COOKIE, verifyAuthToken } from '@/lib/auth';
 
-const AUTH_COOKIE = 'vic_auth';
-
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (
@@ -15,9 +14,13 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const cookie = req.cookies.get(AUTH_COOKIE);
-  if (cookie?.value === 'ok') {
+  const token = req.cookies.get(AUTH_COOKIE)?.value;
+  if (token && (await verifyAuthToken(token))) {
     return NextResponse.next();
+  }
+
+  if (pathname.startsWith('/api/')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const url = req.nextUrl.clone();

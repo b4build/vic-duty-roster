@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-
-const AUTH_COOKIE = 'vic_auth';
+import { AUTH_COOKIE, createAuthToken } from '@/lib/auth';
 
 export async function POST(req: Request) {
   const { password } = await req.json();
   const adminPass = process.env.VIC_ADMIN_PASSWORD;
+  const authSecret = process.env.AUTH_SECRET;
 
-  if (!adminPass) {
+  if (!adminPass || !authSecret) {
     return NextResponse.json({ error: 'Server not configured.' }, { status: 500 });
   }
 
@@ -14,12 +14,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid password.' }, { status: 401 });
   }
 
+  const token = await createAuthToken();
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(AUTH_COOKIE, 'ok', {
+  res.cookies.set(AUTH_COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
-    path: '/'
+    path: '/',
+    maxAge: 60 * 60 * 24 * 7
   });
   return res;
 }

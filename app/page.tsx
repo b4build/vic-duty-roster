@@ -1,19 +1,462 @@
 "use client";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import { Calendar, Users, Printer, Trash2, Plus, Search, Filter, X, ChevronDown, Clock, Building2, UserCircle2, AlertCircle, ClipboardList, DoorOpen, UserCheck, GripVertical, History, LayoutDashboard, TrendingUp, Share2, MessageCircle, Mail, Copy } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Calendar, Users, Printer, Trash2, Plus, Search, Filter, X, ChevronDown, Clock, Building2, UserCircle2, AlertCircle, ClipboardList, DoorOpen, UserCheck, GripVertical, History, LayoutDashboard, TrendingUp, Share2, Copy, Check, Info } from 'lucide-react';
 import facultyData from '@/lib/faculty-data.json';
 import { Faculty, Room, InvigilatorSlot, DragItem, DutyAssignment, ShiftData } from '@/lib/types';
 import { saveDutyAssignment, getDutyAssignmentByDate, updateDutyCounts, initializeFacultyData, getAllFaculty, getDutyHistoryByFaculty, getAllDutyAssignments, getAllDutyHistory, resetDutyCountsForDate, resetAllDutyCounts, exportBackupData, importBackupData, deleteDutyAssignment, clearAllDutyAssignments, replaceFacultyData, updateFacultyRecord } from '@/lib/db-utils';
 
-type ViewMode = 'roster' | 'directory' | 'dashboard';
+type ViewMode = 'roster' | 'directory' | 'dashboard' | 'about';
 type FacultySortBy = 'name' | 'department' | 'designation' | 'dutyCount' | 'fid';
 type SortOrder = 'asc' | 'desc';
+type BlobSyncStatus = {
+  state: 'idle' | 'syncing' | 'synced' | 'error' | 'disabled';
+  message: string;
+  at?: string;
+};
+type BackupMeta = Partial<Record<BackupSection, string>>;
 const DRAFT_KEY_PREFIX = 'vic_duty_draft_';
 const BLOB_BACKUP_API = '/api/blob-backup';
+type BackupSection = 'duties' | 'history' | 'faculty';
+const BACKUP_META_KEY = 'vic_blob_backup_meta';
+const WEEKDAY_OPTIONS = [
+  { label: 'Monday', value: 'monday', short: 'Mon' },
+  { label: 'Tuesday', value: 'tuesday', short: 'Tue' },
+  { label: 'Wednesday', value: 'wednesday', short: 'Wed' },
+  { label: 'Thursday', value: 'thursday', short: 'Thu' },
+  { label: 'Friday', value: 'friday', short: 'Fri' },
+  { label: 'Saturday', value: 'saturday', short: 'Sat' },
+  { label: 'Sunday', value: 'sunday', short: 'Sun' }
+] as const;
+const WEEKDAY_ALIASES: Record<string, string> = {
+  mon: 'monday',
+  monday: 'monday',
+  tue: 'tuesday',
+  tues: 'tuesday',
+  tuesday: 'tuesday',
+  wed: 'wednesday',
+  wednesday: 'wednesday',
+  thu: 'thursday',
+  thur: 'thursday',
+  thurs: 'thursday',
+  thursday: 'thursday',
+  fri: 'friday',
+  friday: 'friday',
+  sat: 'saturday',
+  saturday: 'saturday',
+  sun: 'sunday',
+  sunday: 'sunday'
+};
+
+const parseFidDays = (value: string): string[] => {
+  if (!value) return [];
+  const parts = value
+    .split(',')
+    .map(p => p.trim().toLowerCase())
+    .filter(Boolean)
+    .map(p => WEEKDAY_ALIASES[p] || p)
+    .filter(p => WEEKDAY_OPTIONS.some(option => option.value === p));
+  return Array.from(new Set(parts));
+};
+
+const formatFidDays = (days: string[]) =>
+  days
+    .map(day => WEEKDAY_OPTIONS.find(option => option.value === day)?.label || day)
+    .join(', ');
+
+const parseUnavailableDates = (value: string): string[] => {
+  if (!value) return [];
+  const parts = value
+    .split(',')
+    .map(p => p.trim())
+    .filter(p => /^\d{4}-\d{2}-\d{2}$/.test(p));
+  return Array.from(new Set(parts)).sort();
+};
+
+const formatUnavailableDates = (dates: string[]) => Array.from(new Set(dates)).sort().join(', ');
+const ABOUT_SECTIONS = {
+  quickStart: [
+    {
+      step: 1,
+      title: 'Choose Your Date & Exam Details',
+      what: 'Select the examination date and configure exam context (Course, Semester, Year, Curriculum)',
+      how: 'Navigate to Duty Roster → Pick date from calendar → Fill in course (e.g., B.A./B.Sc.), semester (e.g., SEM V), year, and curriculum type',
+      why: 'This information appears on the printed roster header and helps organize your duty records chronologically'
+    },
+    {
+      step: 2,
+      title: 'Configure Shift Mode',
+      what: 'Decide if you need Forenoon only, Afternoon only, or Both shifts',
+      how: 'Click the shift mode dropdown → Select "Both", "Forenoon", or "Afternoon" based on exam schedule',
+      why: 'This controls which supervisor fields and room sections appear, preventing confusion about which shifts need coverage'
+    },
+    {
+      step: 3,
+      title: 'Assign Shift Supervisors',
+      what: 'Designate the overall supervisor for each active shift',
+      how: 'Use the Supervisor dropdown for each active shift → Select from available faculty → The system auto-filters faculty based on their FID days and unavailable dates',
+      why: 'Supervisors are accountable for the entire shift, so they should be assigned before distributing room-level responsibilities'
+    },
+    {
+      step: 4,
+      title: 'Create Room Blocks',
+      what: 'Define examination rooms with student count and required invigilators',
+      how: 'Click "+ Add Room" → Enter room number → Input student count → Specify how many invigilators needed (typically 1-2 per room) → Repeat for each room',
+      why: 'This creates the structure before you fill slots, making it clear how many faculty members you need to assign'
+    },
+    {
+      step: 5,
+      title: 'Assign Invigilators to Rooms',
+      what: 'Fill each invigilator slot with available faculty members',
+      how: 'Desktop: Drag faculty names from the Available Faculty panel and drop into room slots. Mobile/Tablet: Click a slot → Select from dropdown → The system shows only available faculty (filtering out those on FID leave or marked unavailable for that date)',
+      why: 'This is the core duty allocation step where you distribute examination responsibilities fairly across available staff'
+    },
+    {
+      step: 6,
+      title: 'Validate Completion',
+      what: 'Verify all required slots are filled before saving',
+      how: 'Check the Roster Summary panel → It shows Filled/Total counts for each shift → Look for any red/unfilled indicators → Review the Duty Count Preview to ensure fair distribution',
+      why: 'Catching missing assignments now prevents printing incomplete rosters or having to reassign at the last minute'
+    },
+    {
+      step: 7,
+      title: 'Save and Generate Output',
+      what: 'Persist your roster and create printable/shareable versions',
+      how: 'Click "Save & Print" button → This saves to local storage and opens preview mode → From preview: Print directly (Ctrl+P), Download as PDF, Download as Word (.docx), or Share via system share sheet',
+      why: 'Saving locks the duty assignment in the system, updates duty counts for fairness tracking, and enables professional output formats'
+    },
+  ],
+  
+  dutyRosterModule: {
+    overview: 'The Duty Roster is your primary workspace for creating examination duty assignments. It handles date-specific rosters with intelligent faculty filtering and real-time validation.',
+    
+    features: [
+      {
+        name: 'Smart Date Selection',
+        description: 'Choose any examination date from an integrated calendar picker. The system automatically loads any previously saved roster for that date, or starts fresh if it\'s a new assignment.',
+        usage: 'Click the date field → Calendar opens → Select date → Previously saved data loads automatically (if exists)'
+      },
+      {
+        name: 'Exam Context Configuration',
+        description: 'Course, Semester, Year, and Curriculum fields provide essential context that appears on the printed roster header.',
+        usage: 'Fill in text fields or use dropdowns (if pre-configured). Example: Course = "B.A. / B.Sc. / B.Com.", Semester = "SEM V", Year = "2025", Curriculum = "Under CCF"'
+      },
+      {
+        name: 'Flexible Shift Management',
+        description: 'Handle single-shift or dual-shift examination schedules. Each shift has its own supervisor and room set.',
+        usage: 'Shift Mode dropdown offers: "Both" (default, shows forenoon + afternoon), "Forenoon" (morning only), "Afternoon" (afternoon only). Each shift allows custom time labels (e.g., "Morning 10 AM Onwards")'
+      },
+      {
+        name: 'Availability-Aware Faculty Filtering',
+        description: 'Faculty members appear in the Available Faculty list only if they meet two criteria: (1) The exam date matches one of their FID working days, AND (2) The date is not in their unavailable dates list.',
+        usage: 'The Available Faculty panel automatically updates when you change dates. Faculty in red or grayed out are unavailable for the selected date. Check Faculty Directory to modify FID days or unavailable dates if needed.'
+      },
+      {
+        name: 'Drag-and-Drop Assignment (Desktop)',
+        description: 'On larger screens, you can drag faculty names directly from the Available Faculty panel into room invigilator slots.',
+        usage: 'Click and hold a faculty name → Drag to a room slot → Release to assign. Slots show faculty short names. You can drag from Available Faculty or reorder between slots.'
+      },
+      {
+        name: 'Dropdown Assignment (Mobile/Compact)',
+        description: 'On smaller screens or when drag-drop is impractical, each slot becomes a dropdown selector.',
+        usage: 'Tap an empty slot → Dropdown shows available faculty → Select name → It fills the slot. To remove, select the empty option in dropdown or click the X button.'
+      },
+      {
+        name: 'Repeat Duty Control',
+        description: 'By default, the system prevents assigning the same faculty to multiple slots on the same date. You can override this if needed.',
+        usage: 'Toggle "Allow Repeat Duty" checkbox if you need to assign someone multiple times (e.g., in understaffed scenarios). When disabled, selecting a faculty member in one slot removes them from other dropdowns.'
+      },
+      {
+        name: 'Real-Time Roster Summary',
+        description: 'The Roster Summary panel shows completion status for each shift and warns about unfilled slots.',
+        usage: 'View at any time during assignment. Shows: Supervisor status (assigned/missing), Room count, Filled slots / Total slots. Red indicators highlight problems.'
+      },
+      {
+        name: 'Duty Count Preview Integration',
+        description: 'While assigning, you can see how many duties each faculty member has accumulated across all saved rosters.',
+        usage: 'Check the "Duty Count Preview" panel in the sidebar. Faculty with higher duty counts appear at the top. Use this to distribute fairly and avoid overloading certain individuals.'
+      },
+      {
+        name: 'Draft Auto-Save',
+        description: 'Your work is continuously saved as a draft in browser local storage, even before you click "Save & Print".',
+        usage: 'Just fill in fields and assign faculty. If you navigate away or close the tab, your progress is preserved. Return to the same date to continue where you left off.'
+      },
+      {
+        name: 'Save & Print Workflow',
+        description: 'When you click "Save & Print", the system permanently saves the roster, updates duty counts, syncs to cloud (if configured), and opens print preview.',
+        usage: 'Click "Save & Print" → Roster saved → Preview opens with multiple export options (Print, PDF, Word, Share, Copy Image) → Close preview returns to editing mode'
+      },
+    ],
+    
+    tips: [
+      'Fill supervisors first — it sets the accountability structure before distributing room duties',
+      'Use Duty Count Preview to identify faculty who need more assignments and achieve fair distribution',
+      'If a faculty member should be available but isn\'t showing, check Faculty Directory → their FID days may not include the exam date, or they may be marked unavailable',
+      'On mobile, landscape orientation provides more room for comfortable editing',
+      'Save frequently if working on complex rosters with many rooms — though drafts auto-save, explicit saves create permanent records',
+    ]
+  },
+  
+  facultyDirectoryModule: {
+    overview: 'The Faculty Directory is your master database of all staff members. It stores personal details, availability patterns, and is the source of truth for the entire duty roster system.',
+    
+    features: [
+      {
+        name: 'Faculty Profile Management',
+        description: 'Each faculty record contains: ID (unique identifier), Full Name, Short Name (for compact display on rosters), Designation (e.g., Professor, SACT-I), Department (e.g., Bengali, English), Gender (Male/Female), FID Days (working days), Unavailable Dates (specific days off), and Duty Count (auto-tracked).',
+        usage: 'Click any faculty row → Side panel opens with all fields editable → Make changes → Click "Update Faculty" to save'
+      },
+      {
+        name: 'Search and Filter',
+        description: 'Quickly locate faculty using text search or department filter.',
+        usage: 'Search box: Type any part of name, ID, or designation → Results filter in real-time. Department dropdown: Select "All" or specific department → List narrows to that department only.'
+      },
+      {
+        name: 'Sorting Options',
+        description: 'Sort faculty list by Name, Department, Designation, Duty Count, or Faculty ID in ascending/descending order.',
+        usage: 'Click column headers or use "Sort by" dropdown → Choose field → Click again to reverse order. Use "Duty Count" sorting to identify who has the most/least duties.'
+      },
+      {
+        name: 'FID (Fixed Institutional Days) Configuration',
+        description: 'FID defines which weekdays a faculty member is normally available for work. This is the primary availability filter used throughout the system.',
+        usage: 'In edit panel → FID field shows multi-select dropdown → Check all applicable days (Monday, Tuesday, etc.) → System interprets commas or multi-selection → Invalid entries are ignored. Example: "Monday, Wednesday, Friday" means faculty is only available on those days.'
+      },
+      {
+        name: 'Unavailable Dates Management',
+        description: 'Mark specific dates when a faculty member cannot be assigned duties (leave, medical, personal commitments).',
+        usage: 'Edit panel → Unavailable Dates field → Click to open date picker → Select date(s) → Dates appear as removable chips → Click X on chip to remove a date. Dates must be in YYYY-MM-DD format. Use calendar picker to avoid typing errors.'
+      },
+      {
+        name: 'Short Name Display',
+        description: 'Short names (e.g., "Tapasi B" instead of "Tapasi Bandyopadhyay") keep printed rosters clean and readable.',
+        usage: 'Edit a faculty → Short Name field → Enter abbreviated version → This appears on all printed rosters and room assignments'
+      },
+      {
+        name: 'Duty Count Tracking',
+        description: 'The system automatically increments each faculty\'s duty count when you save a roster. This powers fairness analysis.',
+        usage: 'Read-only field visible in faculty details. Updated automatically when rosters are saved. Reset via Dashboard → Reset Operations if you need to clear counts (e.g., start of new semester).'
+      },
+      {
+        name: 'Bulk Faculty Import',
+        description: 'Replace entire faculty list by uploading a JSON file with validated structure.',
+        usage: 'Dashboard → Operations → Upload Faculty JSON → Select .json file → System validates structure → Imports if valid, rejects if malformed. Download current faculty JSON first as template.'
+      },
+      {
+        name: 'Faculty JSON Download',
+        description: 'Export current faculty data as JSON for backup, editing externally, or sharing.',
+        usage: 'Dashboard → Operations → Download Faculty JSON → File downloads with all current faculty records in JSON array format'
+      },
+    ],
+    
+    tips: [
+      'Set FID days accurately for each faculty — this is critical for correct availability filtering in Duty Roster',
+      'Use Short Names consistently (e.g., "FirstName L" format) for professional-looking rosters',
+      'Update Unavailable Dates proactively when faculty inform you of planned leaves',
+      'Keep a backup of Faculty JSON before doing bulk operations or major edits',
+      'Gender field is tracked but currently not used in assignment logic — it may support gender-balanced duty allocation in future versions',
+    ]
+  },
+  
+  dashboardModule: {
+    overview: 'The Dashboard provides oversight, analytics, and administrative operations. Use it to monitor duty distribution fairness, access saved rosters, and perform system maintenance.',
+    
+    features: [
+      {
+        name: 'Key Metrics Cards',
+        description: 'Four summary cards show: (1) Saved Duty Dates (count of rosters), (2) Total Duty Entries (count of individual assignments), (3) Faculty Assigned (unique faculty who have at least one duty), (4) Duty Fairness Score (0-100%, higher is more equitable distribution).',
+        usage: 'View at a glance when you open Dashboard. Click through to details if needed. Fairness Score requires minimum 10 duty entries to calculate reliably.'
+      },
+      {
+        name: 'Saved Dates List',
+        description: 'See all saved duty rosters chronologically with completion status, shift info, and quick actions.',
+        usage: 'Each card shows: Date, Shift Mode, Filled/Total slot count, Progress bar. Click card to load that roster in Duty Roster view. Use Share button to open preview for that date. Use Delete button to remove a saved roster (prompts confirmation).'
+      },
+      {
+        name: 'Duty Count Preview',
+        description: 'Bar chart visualization showing how many duties each faculty member has been assigned, sorted by count (highest to lowest by default).',
+        usage: 'Scroll through list to see full distribution. Longer bars = more duties. Use this to identify overloaded faculty or those who need more assignments. Click a name (if implemented) to see duty history for that person.'
+      },
+      {
+        name: 'Weekday Load Distribution',
+        description: 'Shows how many examinations fall on each day of the week across all saved rosters.',
+        usage: 'Bar chart with days (Mon-Sun) and counts. Identifies if exams are clustered on certain days. Useful for resource planning and understanding scheduling patterns.'
+      },
+      {
+        name: 'Highest Duty Holders',
+        description: 'Top 10 faculty ranked by duty count with detailed breakdown.',
+        usage: 'Table shows Name, Department, Duty Count. Quickly spot who carries the heaviest load. Consider rotating duties if certain individuals dominate the list.'
+      },
+      {
+        name: 'Reset Operations',
+        description: 'Clear duty counts or entire rosters. Two scopes: (1) Reset one specific date, (2) Reset all duty counts globally.',
+        usage: 'Reset Duty Counts for a Date: Enter date → Click "Reset Counts for Date" → Only that date\'s duty tallies are recalculated. Reset All Duty Counts: Click "Reset All Duty Counts" → All faculty duty counts set to zero (prompts confirmation). Use these when starting a new academic term or correcting errors.'
+      },
+      {
+        name: 'Backup and Restore',
+        description: 'Full system backup includes duties, history, and faculty data in a single JSON file.',
+        usage: 'Download Backup: Click "Download Backup" → JSON file downloads with timestamp. Restore Backup: Click file input → Select backup JSON → Confirm replacement → System imports data and refreshes. Always backup before major changes.'
+      },
+      {
+        name: 'Cloud Sync Status (Vercel Blob)',
+        description: 'If configured, the app syncs data to Vercel Blob storage for cloud backup and cross-device access.',
+        usage: 'Status indicator shows: Idle (waiting), Syncing (in progress), Synced (success), Error (failed), Disabled (not configured). Automatic sync happens after saves. Check settings if sync repeatedly fails.'
+      },
+    ],
+    
+    tips: [
+      'Review Fairness Score regularly — if it\'s low (<70%), actively assign duties to under-utilized faculty in upcoming rosters',
+      'Use "Share" button from saved dates to quickly generate and distribute rosters without opening Duty Roster view',
+      'Take a backup before running any reset operation or importing data — this is your safety net',
+      'If Duty Count Preview shows imbalance, prioritize lower-count faculty when creating new rosters',
+      'Weekday Load helps you understand scheduling patterns — if all exams are on Monday, consider faculty availability and workload',
+    ]
+  },
+  
+  advancedFeatures: [
+    {
+      name: 'Theme Customization',
+      description: 'Choose from four visual themes: Light (default white), Dark (dark mode), Solar (warm amber tones), Cool (blue-gray tones).',
+      usage: 'Theme dropdown in top-right corner of any view → Select theme → Applies instantly across entire app → Preference is saved in browser'
+    },
+    {
+      name: 'Print Preview Features',
+      description: 'Preview mode offers multiple export formats beyond basic printing.',
+      usage: 'After clicking "Save & Print": (1) Print - browser print dialog, (2) Download PDF - generates PDF file, (3) Download Word - creates .docx file, (4) Share - uses device share sheet to send via email/messaging, (5) Copy Image - copies roster as image to clipboard'
+    },
+    {
+      name: 'Multi-Date Export',
+      description: 'Export rosters for multiple dates at once (for reporting or archival).',
+      usage: 'Dashboard → Export options (if visible) → Choose date range or select "All Dates" → Download combined report'
+    },
+    {
+      name: 'Responsive Design',
+      description: 'Interface adapts to screen size: Desktop uses drag-drop, tablets use hybrid, mobile uses dropdowns.',
+      usage: 'No configuration needed — system detects screen width and enables appropriate interaction mode. Portrait vs landscape affects available space.'
+    },
+    {
+      name: 'Keyboard Shortcuts',
+      description: 'Navigate faster using keyboard (desktop only).',
+      usage: 'Press Ctrl+P (or Cmd+P) in preview to print directly. Use Tab to move between form fields. Press Enter to confirm modals.'
+    },
+  ],
+  
+  bestPractices: [
+    'Update FID and Unavailable Dates Weekly: Establish a routine (e.g., every Monday) to review and update faculty availability. This prevents last-minute surprises when creating rosters.',
+    
+    'Assign Duties Two Weeks in Advance: Give faculty adequate notice. Create rosters at least 14 days before examination dates whenever possible.',
+    
+    'Use Short Names Consistently: Adopt a standard format (e.g., "FirstName L" where L is last initial) for all faculty. This keeps printed rosters clean and professional.',
+    
+    'Monitor Fairness Score Monthly: Set a target fairness score (e.g., >80%) and review it monthly. If it drops, actively rebalance by assigning duties to under-utilized faculty.',
+    
+    'Backup Before Major Operations: Before importing faculty JSON, resetting counts, or clearing data, always download a backup. Store backups in a secure location.',
+    
+    'Fill Supervisors Before Invigilators: This workflow ensures accountability is set early and helps you think through shift logistics before distributing room-level duties.',
+    
+    'Check Duty Count Before Assigning: Before creating a new roster, glance at Duty Count Preview to identify who needs more assignments. Prioritize those with lower counts.',
+    
+    'Validate Before Printing: Use Roster Summary to confirm all supervisors and slots are filled. Never print incomplete rosters — it creates confusion and extra work.',
+    
+    'Communicate Changes Promptly: If you modify a saved roster, inform affected faculty immediately. Use the Share feature to distribute updated rosters quickly.',
+    
+    'Leverage Cloud Sync: If Vercel Blob is configured, ensure it syncs successfully after major saves. This provides disaster recovery and cross-device access.',
+  ],
+  
+  troubleshooting: [
+    {
+      problem: 'Faculty member not appearing in Available Faculty',
+      solution: 'Check: (1) Is the exam date one of their FID days? (2) Is the date in their Unavailable Dates list? (3) Go to Faculty Directory → Edit the person → Verify FID includes the needed day → Remove date from unavailable if it was added by mistake'
+    },
+    {
+      problem: 'Drag-and-drop not working',
+      solution: 'This is a desktop-only feature. On mobile/tablet, use dropdown selectors instead. If on desktop and still not working, try: (1) Refresh page, (2) Check browser compatibility (modern Chrome/Firefox/Safari/Edge work best), (3) Switch to dropdown mode if issue persists'
+    },
+    {
+      problem: 'Duty counts not updating',
+      solution: 'Duty counts only update when you click "Save & Print", not on draft saves. If you saved but counts didn\'t change: (1) Refresh page and check again, (2) Verify the roster was actually saved (check Dashboard Saved Dates), (3) Try re-saving the roster'
+    },
+    {
+      problem: 'Cloud sync failing',
+      solution: 'Check sync status indicator. If "Disabled" — Vercel Blob is not configured for this deployment. If "Error" — check browser console for details, verify network connection, contact system administrator if it persists. Local storage still works even if cloud sync fails.'
+    },
+    {
+      problem: 'Cannot delete a saved roster',
+      solution: 'From Dashboard Saved Dates → Click the roster card → Click Delete button (trash icon) → Confirm deletion. If delete button is missing, you may need administrator privileges (check with system maintainer).'
+    },
+    {
+      problem: 'PDF/Word download not working',
+      solution: 'Ensure you\'re in Print Preview mode (click "Save & Print" first). Check browser popup blocker settings — downloads may be blocked. Try using a different browser. If still failing, use the Print option and save as PDF from print dialog.'
+    },
+    {
+      problem: 'Faculty import JSON rejected',
+      solution: 'The JSON must be a valid array of faculty objects. Download current Faculty JSON as a template. Ensure: (1) Valid JSON syntax (use a JSON validator), (2) Each faculty has required fields (id, name, department, designation), (3) FID days use correct weekday names, (4) Dates are YYYY-MM-DD format'
+    },
+    {
+      problem: 'Fairness Score shows "--"',
+      solution: 'Fairness Score requires at least 10 total duty entries to calculate. Create more rosters until you reach this threshold. The score becomes reliable once you have enough data points for statistical analysis.'
+    },
+    {
+      problem: 'Lost data after browser crash',
+      solution: 'Data is stored in browser local storage. If browser crashed: (1) Reopen app — drafts should auto-restore, (2) Check Dashboard to see last saved rosters, (3) If data is truly lost, restore from last backup JSON (if you have one), (4) Going forward, enable cloud sync and/or backup more frequently'
+    },
+    {
+      problem: 'Cannot assign same faculty to multiple rooms',
+      solution: 'By default, the system prevents repeat assignments for fairness. If you intentionally need to assign someone multiple times (e.g., emergency coverage), toggle "Allow Repeat Duty" checkbox in Duty Roster view.'
+    },
+  ],
+  
+  technicalDetails: {
+    storage: 'All data is stored in browser local storage (IndexedDB or localStorage depending on browser). Optional cloud sync to Vercel Blob if configured by administrator.',
+    dataStructure: 'Three main data stores: (1) Duties (saved rosters), (2) History (individual faculty assignments), (3) Faculty (master profile list). Each is backed up independently.',
+    compatibility: 'Works in modern browsers: Chrome 90+, Firefox 88+, Safari 14+, Edge 90+. Requires JavaScript enabled. No server required for core functionality (works offline).',
+    performance: 'Optimized for up to 500 faculty members and 1000 saved duty rosters. Large datasets may experience slower load times on older devices.',
+    security: 'Data is stored locally on your device. Cloud sync (if enabled) uses HTTPS. No passwords or sensitive data is transmitted. Use browser incognito mode for privacy on shared computers.',
+  },
+  
+  glossary: [
+    { term: 'FID (Fixed Institutional Days)', definition: 'The weekdays a faculty member is officially scheduled to work at the institution. Used as the primary availability filter.' },
+    { term: 'Unavailable Dates', definition: 'Specific calendar dates when a faculty member cannot be assigned duties (leave, appointments, conflicts).' },
+    { term: 'Shift Mode', definition: 'Examination timing configuration: Forenoon (morning only), Afternoon (afternoon only), or Both (two shifts in one day).' },
+    { term: 'Supervisor', definition: 'Faculty member responsible for overseeing an entire examination shift across all rooms.' },
+    { term: 'Invigilator', definition: 'Faculty member assigned to monitor students in a specific examination room during a shift.' },
+    { term: 'Duty Count', definition: 'Total number of times a faculty member has been assigned as supervisor or invigilator across all saved rosters.' },
+    { term: 'Fairness Score', definition: 'Statistical measure (0-100%) of how evenly duties are distributed. Higher scores indicate more balanced workload distribution.' },
+    { term: 'Draft', definition: 'Unsaved roster data temporarily stored in browser. Preserved across page refreshes but not counted in duty analytics until saved.' },
+    { term: 'Roster Summary', definition: 'Real-time status panel showing completion of supervisor and invigilator assignments for the current roster.' },
+    { term: 'Cloud Sync', definition: 'Optional feature that backs up data to Vercel Blob storage for cross-device access and disaster recovery.' },
+  ],
+};
+
+const getLocalBackupMeta = (): BackupMeta => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(BACKUP_META_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed as BackupMeta;
+  } catch {
+    return {};
+  }
+};
+
+const setLocalBackupMeta = (meta: BackupMeta) => {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(BACKUP_META_KEY, JSON.stringify(meta));
+};
+
+const isCloudTimestampNewer = (cloudTs?: string, localTs?: string) => {
+  if (!cloudTs) return false;
+  if (!localTs) return true;
+  const cloud = Date.parse(cloudTs);
+  const local = Date.parse(localTs);
+  if (Number.isNaN(cloud) || Number.isNaN(local)) return cloudTs > localTs;
+  return cloud > local;
+};
 
 export default function DutyRoster() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [viewMode, setViewMode] = useState<ViewMode>('roster');
   
   // Faculty Directory states
@@ -29,6 +472,7 @@ export default function DutyRoster() {
     unavailable: '',
     gender: '' as '' | 'Male' | 'Female'
   });
+  const [unavailableDateInput, setUnavailableDateInput] = useState('');
   const [directorySortBy, setDirectorySortBy] = useState<FacultySortBy>('name');
   const [directorySortOrder, setDirectorySortOrder] = useState<SortOrder>('asc');
   
@@ -45,40 +489,131 @@ export default function DutyRoster() {
   const [availableSortBy, setAvailableSortBy] = useState<FacultySortBy>('name');
   const [availableSortOrder, setAvailableSortOrder] = useState<SortOrder>('asc');
   const [isCompactScreen, setIsCompactScreen] = useState(false);
+  const [blobSyncStatus, setBlobSyncStatus] = useState<BlobSyncStatus>({
+    state: 'idle',
+    message: 'Waiting for cloud sync'
+  });
+  const unavailableDateInputRef = useRef<HTMLInputElement | null>(null);
   const allFaculty = useMemo(() => getAllFaculty(), [dataVersion]);
   const printRef = useRef<HTMLDivElement | null>(null);
 
-  const syncBackupToBlob = async () => {
+  const syncBackupToBlob = async (sections: BackupSection[] = ['duties', 'history', 'faculty']) => {
     try {
-      const payload = exportBackupData();
+      setBlobSyncStatus({ state: 'syncing', message: 'Syncing changes to Blob...' });
+      const now = new Date().toISOString();
+      const localMeta = getLocalBackupMeta();
+      const payloadMeta: BackupMeta = {};
+      const payload: {
+        duties?: ReturnType<typeof getAllDutyAssignments>;
+        history?: ReturnType<typeof getAllDutyHistory>;
+        faculty?: ReturnType<typeof getAllFaculty>;
+        _meta?: BackupMeta;
+      } = {};
+      if (sections.includes('duties')) {
+        payload.duties = getAllDutyAssignments();
+        payloadMeta.duties = now;
+        localMeta.duties = now;
+      }
+      if (sections.includes('history')) {
+        payload.history = getAllDutyHistory();
+        payloadMeta.history = now;
+        localMeta.history = now;
+      }
+      if (sections.includes('faculty')) {
+        payload.faculty = getAllFaculty();
+        payloadMeta.faculty = now;
+        localMeta.faculty = now;
+      }
+      payload._meta = payloadMeta;
       const response = await fetch(BLOB_BACKUP_API, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       if (!response.ok) {
+        setBlobSyncStatus({ state: 'error', message: `Sync failed (${response.status})` });
         console.error('Blob sync failed with status:', response.status);
+        return;
       }
+      const result = await response.json().catch(() => null);
+      if (result?.skipped === 'blob_not_configured') {
+        setLocalBackupMeta(localMeta);
+        setBlobSyncStatus({ state: 'disabled', message: 'Blob not configured in this environment' });
+        return;
+      }
+      setLocalBackupMeta(localMeta);
+      setBlobSyncStatus({
+        state: 'synced',
+        message: `Cloud backup synced (${sections.join(', ')})`,
+        at: now
+      });
     } catch (error) {
+      setBlobSyncStatus({ state: 'error', message: 'Sync failed. Using local data only.' });
       console.error('Blob sync failed:', error);
     }
   };
 
   const hydrateFromBlob = async () => {
     try {
+      setBlobSyncStatus({ state: 'syncing', message: 'Checking cloud backup...' });
       const response = await fetch(BLOB_BACKUP_API, { cache: 'no-store' });
-      if (response.status === 404) return;
+      if (response.status === 404) {
+        setBlobSyncStatus({ state: 'disabled', message: 'No cloud backup configured/found' });
+        return;
+      }
       if (!response.ok) {
+        setBlobSyncStatus({ state: 'error', message: `Restore failed (${response.status})` });
         console.error('Blob restore failed with status:', response.status);
         return;
       }
-      const data = await response.json();
-      if (!data || typeof data !== 'object' || !('faculty' in data)) return;
-      importBackupData(data);
+      const data = await response.json() as {
+        duties?: ReturnType<typeof getAllDutyAssignments>;
+        history?: ReturnType<typeof getAllDutyHistory>;
+        faculty?: ReturnType<typeof getAllFaculty>;
+        _meta?: BackupMeta;
+      };
+      if (!data || typeof data !== 'object' || !('faculty' in data)) {
+        setBlobSyncStatus({ state: 'disabled', message: 'No valid cloud backup found' });
+        return;
+      }
+      const localData = exportBackupData();
+      const localMeta = getLocalBackupMeta();
+      const cloudMeta = data._meta || {};
+      const merged = { ...localData };
+      const applied: BackupSection[] = [];
+
+      (['duties', 'history', 'faculty'] as BackupSection[]).forEach(section => {
+        if (!(section in data)) return;
+        const cloudTs = cloudMeta[section];
+        const localTs = localMeta[section];
+        if (isCloudTimestampNewer(cloudTs, localTs)) {
+          (merged as any)[section] = (data as any)[section];
+          if (cloudTs) localMeta[section] = cloudTs;
+          applied.push(section);
+        }
+      });
+
+      if (applied.length === 0) {
+        setBlobSyncStatus({
+          state: 'synced',
+          message: 'Local data is newer than cloud backup',
+          at: new Date().toISOString()
+        });
+        return;
+      }
+
+      importBackupData(merged);
+      setLocalBackupMeta(localMeta);
       setDataVersion(v => v + 1);
       loadDutyAssignment(selectedDate);
       setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
+      setBlobSyncStatus({
+        state: 'synced',
+        message: `Cloud backup restored (${applied.join(', ')})`,
+        at: new Date().toISOString()
+      });
     } catch (error) {
+      setBlobSyncStatus({ state: 'error', message: 'Restore failed. Using local data.' });
       console.error('Blob restore failed:', error);
     }
   };
@@ -109,6 +644,13 @@ export default function DutyRoster() {
   const [draggedItem, setDraggedItem] = useState<DragItem | null>(null);
 
   // Initialize faculty data and load saved assignment
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'dashboard' || tab === 'roster' || tab === 'directory' || tab === 'about') {
+      setViewMode(tab);
+    }
+  }, [searchParams]);
+
   useEffect(() => {
     initializeFacultyData(facultyData as Faculty[]);
     const filtered = getAvailableFacultyByDate(selectedDate, getAllFaculty());
@@ -237,11 +779,10 @@ export default function DutyRoster() {
     const date = new Date(dateValue);
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
     return source.filter(f => {
-      const fid = (f.fid || '').toLowerCase();
-      if (!fid) return true;
-      const fidDays = fid.split(',').map(d => d.trim()).filter(Boolean);
-      const isFidDay = fidDays.some(day => dayName.includes(day) || day.includes(dayName));
-      return !isFidDay;
+      const unavailableDates = parseUnavailableDates(f.unavailable || '');
+      if (unavailableDates.includes(dateValue)) return false;
+      const fidDays = parseFidDays(f.fid || '');
+      return !fidDays.includes(dayName);
     });
   };
 
@@ -377,8 +918,7 @@ export default function DutyRoster() {
   const savedAssignments = [...allAssignments].sort((a, b) => b.date.localeCompare(a.date));
   const assignedFacultyIds = new Set(allHistory.map(h => h.facultyId));
   const facultyByLoad = [...allFaculty].sort((a, b) => (b.dutyCount || 0) - (a.dutyCount || 0));
-  const topFacultyLoad = facultyByLoad.slice(0, 8);
-  const maxDutyCount = topFacultyLoad[0]?.dutyCount || 1;
+  const maxDutyCount = facultyByLoad[0]?.dutyCount || 1;
   const dutyCounts = allFaculty.map(f => f.dutyCount || 0);
   const meanDuty = dutyCounts.length
     ? dutyCounts.reduce((sum, count) => sum + count, 0) / dutyCounts.length
@@ -423,7 +963,7 @@ export default function DutyRoster() {
       setAvailableFaculty(getAvailableFacultyByDate(date, getAllFaculty()));
     }
     setDataVersion(v => v + 1);
-    void syncBackupToBlob();
+    void syncBackupToBlob(['duties', 'history', 'faculty']);
   };
 
   const addRoom = (shift: 1 | 2) => {
@@ -762,7 +1302,7 @@ export default function DutyRoster() {
     updateDutyCounts(assignment);
     clearDraftForDate(selectedDate);
     setDataVersion(v => v + 1);
-    void syncBackupToBlob();
+    void syncBackupToBlob(['duties', 'history', 'faculty']);
   };
 
   const handlePreviewAndPrint = () => {
@@ -854,7 +1394,7 @@ export default function DutyRoster() {
     loadDutyAssignment(selectedDate);
     setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
     setDataVersion(v => v + 1);
-    void syncBackupToBlob();
+    void syncBackupToBlob(['duties', 'history', 'faculty']);
   };
 
   const handleResetAll = () => {
@@ -866,24 +1406,28 @@ export default function DutyRoster() {
     loadDutyAssignment(selectedDate);
     setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
     setDataVersion(v => v + 1);
-    void syncBackupToBlob();
+    void syncBackupToBlob(['duties', 'history', 'faculty']);
   };
 
   const startEditFaculty = () => {
     if (!selectedFaculty) return;
+    const fidDays = parseFidDays(selectedFaculty.fid || '');
+    const unavailableDates = parseUnavailableDates(selectedFaculty.unavailable || '');
     setFacultyEdit({
       designation: selectedFaculty.designation || '',
       department: selectedFaculty.department || '',
-      fid: selectedFaculty.fid || '',
+      fid: formatFidDays(fidDays),
       shortName: selectedFaculty.shortName || '',
-      unavailable: selectedFaculty.unavailable || '',
+      unavailable: formatUnavailableDates(unavailableDates),
       gender: selectedFaculty.gender || ''
     });
+    setUnavailableDateInput('');
     setIsEditingFaculty(true);
   };
 
   const cancelEditFaculty = () => {
     setIsEditingFaculty(false);
+    setUnavailableDateInput('');
   };
 
   const saveEditedFaculty = () => {
@@ -895,9 +1439,9 @@ export default function DutyRoster() {
     const updated = updateFacultyRecord(selectedFaculty.id, {
       department: facultyEdit.department.trim(),
       designation: facultyEdit.designation.trim(),
-      fid: facultyEdit.fid.trim(),
+      fid: formatFidDays(parseFidDays(facultyEdit.fid)),
       shortName: facultyEdit.shortName.trim() || undefined,
-      unavailable: facultyEdit.unavailable.trim(),
+      unavailable: formatUnavailableDates(parseUnavailableDates(facultyEdit.unavailable)) || undefined,
       gender: facultyEdit.gender || undefined
     });
     if (!updated) {
@@ -906,9 +1450,39 @@ export default function DutyRoster() {
     }
     setSelectedFaculty(updated);
     setIsEditingFaculty(false);
+    setUnavailableDateInput('');
     setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
     setDataVersion(v => v + 1);
-    void syncBackupToBlob();
+    void syncBackupToBlob(['faculty']);
+  };
+
+  const toggleFidDay = (day: string) => {
+    setFacultyEdit(prev => {
+      const selected = parseFidDays(prev.fid);
+      const next = selected.includes(day)
+        ? selected.filter(d => d !== day)
+        : [...selected, day];
+      return { ...prev, fid: formatFidDays(next) };
+    });
+  };
+
+  const addUnavailableDate = () => {
+    if (!unavailableDateInput) return;
+    setFacultyEdit(prev => {
+      const existing = parseUnavailableDates(prev.unavailable);
+      return {
+        ...prev,
+        unavailable: formatUnavailableDates([...existing, unavailableDateInput])
+      };
+    });
+    setUnavailableDateInput('');
+  };
+
+  const removeUnavailableDate = (date: string) => {
+    setFacultyEdit(prev => {
+      const next = parseUnavailableDates(prev.unavailable).filter(d => d !== date);
+      return { ...prev, unavailable: formatUnavailableDates(next) };
+    });
   };
 
   const handleLogout = async () => {
@@ -1003,7 +1577,7 @@ export default function DutyRoster() {
       setSelectedFaculty(null);
       setAvailableFaculty(getAvailableFacultyByDate(selectedDate, normalized));
       setDataVersion(v => v + 1);
-      void syncBackupToBlob();
+      void syncBackupToBlob(['faculty']);
       alert('Faculty data updated successfully.');
     } catch (error: any) {
       alert(error?.message || 'Failed to import faculty data.');
@@ -1138,45 +1712,6 @@ export default function DutyRoster() {
     }
   };
 
-  const shareViaWhatsApp = async () => {
-    try {
-      const imageBlob = await getPreviewImageBlob();
-      if (imageBlob && navigator.share) {
-        const imageFile = new File([imageBlob], `duty-chart-${selectedDate}.png`, { type: 'image/png' });
-        const canShareFiles = (navigator as any).canShare?.({ files: [imageFile] });
-        if (canShareFiles) {
-          await navigator.share({ title: 'VIC Duty Roster', text: shareMessage, files: [imageFile] });
-          return;
-        }
-      }
-    } catch {
-      // fallback to wa link text below
-    }
-    const text = encodeURIComponent(shareMessage);
-    window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer');
-  };
-
-  const shareViaEmail = async () => {
-    try {
-      const pdfBlob = await getPdfBlob();
-      if (pdfBlob && navigator.share) {
-        const pdfFile = new File([pdfBlob], `duty-chart-${selectedDate}.pdf`, { type: 'application/pdf' });
-        const canShareFiles = (navigator as any).canShare?.({ files: [pdfFile] });
-        if (canShareFiles) {
-          await navigator.share({ title: `Duty Roster - ${selectedDate}`, text: shareMessage, files: [pdfFile] });
-          return;
-        }
-      }
-    } catch {
-      // Fallback to mailto + downloaded PDF.
-    }
-    await downloadPdf();
-    const subject = encodeURIComponent(`Duty Roster - ${selectedDate}`);
-    const body = encodeURIComponent(
-      `${shareMessage}\n\nPDF has been downloaded as attachment file.\nPlease attach it manually if your mail client does not auto-attach.`
-    );
-    window.open(`mailto:?subject=${subject}&body=${body}`, '_self');
-  };
 
   const copyPreviewImage = async () => {
     try {
@@ -1193,30 +1728,6 @@ export default function DutyRoster() {
     }
   };
 
-  const copyPreviewPdf = async () => {
-    try {
-      if (!navigator.clipboard || !('write' in navigator.clipboard)) {
-        await downloadPdf();
-        const clipboardAny = (navigator as any).clipboard;
-        if (clipboardAny && typeof clipboardAny.writeText === 'function') {
-          await clipboardAny.writeText(`Duty chart downloaded: duty-chart-${selectedDate}.pdf`);
-        }
-        alert('Direct PDF clipboard is not supported. PDF downloaded instead.');
-        return;
-      }
-      const pdfBlob = await getPdfBlob();
-      if (!pdfBlob) return;
-      await (navigator.clipboard as any).write([new ClipboardItem({ 'application/pdf': pdfBlob })]);
-      alert('PDF copied to clipboard.');
-    } catch {
-      await downloadPdf();
-      const clipboardAny = (navigator as any).clipboard;
-      if (clipboardAny && typeof clipboardAny.writeText === 'function') {
-        await clipboardAny.writeText(`Duty chart downloaded: duty-chart-${selectedDate}.pdf`);
-      }
-      alert('PDF clipboard is limited in this browser. PDF downloaded instead.');
-    }
-  };
 
   const shareSavedDateFromDashboard = async (date: string) => {
     const text = buildShareMessageForDate(date);
@@ -1267,7 +1778,7 @@ export default function DutyRoster() {
       importBackupData(data);
       clearAllDrafts();
       setDataVersion(v => v + 1);
-      void syncBackupToBlob();
+      void syncBackupToBlob(['duties', 'history', 'faculty']);
     } catch {
       alert('Failed to import backup.');
     } finally {
@@ -1329,7 +1840,7 @@ export default function DutyRoster() {
             onClick={() => window.print()} 
             className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/30"
           >
-            <Printer size={18} /> Print / Save PDF (A4)
+            <Printer size={18} /> Print
           </button>
           <button
             onClick={downloadPdf}
@@ -1350,28 +1861,10 @@ export default function DutyRoster() {
             <Share2 size={16} /> Share
           </button>
           <button
-            onClick={shareViaWhatsApp}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
-          >
-            <MessageCircle size={16} /> WhatsApp
-          </button>
-          <button
-            onClick={shareViaEmail}
-            className="flex items-center gap-2 px-4 py-2 bg-sky-600 text-white rounded-lg font-medium hover:bg-sky-700 transition-colors"
-          >
-            <Mail size={16} /> Email
-          </button>
-          <button
             onClick={copyPreviewImage}
             className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 transition-colors"
           >
             <Copy size={16} /> Copy Image
-          </button>
-          <button
-            onClick={copyPreviewPdf}
-            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg font-medium hover:bg-orange-700 transition-colors"
-          >
-            <Copy size={16} /> Copy PDF
           </button>
         </div>
 
@@ -1496,6 +1989,13 @@ export default function DutyRoster() {
                     <Users size={18} />
                     Faculty Directory
                   </button>
+                  <button
+                    onClick={() => setViewMode('about')}
+                    className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
+                  >
+                    <Info size={18} />
+                    About
+                  </button>
                 </nav>
               </div>
               <div className="flex items-center gap-2 w-full md:w-auto">
@@ -1618,9 +2118,28 @@ export default function DutyRoster() {
               </div>
 
               <div className="theme-card rounded-xl p-6">
-                <h2 className="text-lg font-bold text-slate-900 mb-4">Roster Tools</h2>
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <h2 className="text-lg font-bold text-slate-900">Roster Tools</h2>
+                  <span
+                    className={`text-[11px] px-2.5 py-1 rounded-full border font-semibold ${
+                      blobSyncStatus.state === 'synced'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : blobSyncStatus.state === 'syncing'
+                          ? 'bg-blue-50 text-blue-700 border-blue-200'
+                          : blobSyncStatus.state === 'error'
+                            ? 'bg-red-50 text-red-700 border-red-200'
+                            : 'bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                    title={blobSyncStatus.at ? `Last update: ${new Date(blobSyncStatus.at).toLocaleString('en-GB')}` : undefined}
+                  >
+                    {blobSyncStatus.message}
+                  </span>
+                </div>
                 <div className="space-y-4">
                   <div className="text-sm font-semibold text-slate-800">Roster Export</div>
+                  <p className="text-xs text-slate-500 -mt-2">
+                    What: exports roster assignments to CSV. How: choose all dates or a range, then download.
+                  </p>
                   <label className="flex items-center gap-2 text-sm text-slate-700">
                     <input
                       type="checkbox"
@@ -1659,6 +2178,9 @@ export default function DutyRoster() {
                   </button>
 
                   <div className="text-sm font-semibold text-slate-800 pt-4 border-t border-slate-200">Reset</div>
+                  <p className="text-xs text-slate-500 -mt-2">
+                    What: clears saved duties and recalculates duty counts. How: use selected date reset for one day, or reset all for full wipe.
+                  </p>
                   <div>
                     <label className="block text-xs text-slate-600 mb-1">Target date</label>
                     <input
@@ -1682,6 +2204,9 @@ export default function DutyRoster() {
                   </button>
 
                   <div className="text-sm font-semibold text-slate-800 pt-4 border-t border-slate-200">Backup & Restore</div>
+                  <p className="text-xs text-slate-500 -mt-2">
+                    What: backup contains duties, history, and faculty master. How: download JSON snapshot, or upload JSON to replace current data.
+                  </p>
                   <button
                     onClick={downloadBackup}
                     className="w-full px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors"
@@ -1699,6 +2224,9 @@ export default function DutyRoster() {
                   </label>
 
                   <div className="text-sm font-semibold text-slate-800 pt-4 border-t border-slate-200">Faculty Data</div>
+                  <p className="text-xs text-slate-500 -mt-2">
+                    What: faculty file stores profile/FID/unavailable fields. How: download current master JSON or upload a validated JSON array to replace it.
+                  </p>
                   <button
                     onClick={downloadFacultyJson}
                     className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
@@ -1724,11 +2252,11 @@ export default function DutyRoster() {
                   <TrendingUp size={18} />
                   Duty Count Preview
                 </h2>
-                <div className="space-y-3">
-                  {topFacultyLoad.length === 0 ? (
+                <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                  {facultyByLoad.length === 0 ? (
                     <div className="text-sm text-slate-600">No duty data yet.</div>
                   ) : (
-                    topFacultyLoad.map(faculty => {
+                    facultyByLoad.map(faculty => {
                       const count = faculty.dutyCount || 0;
                       const width = Math.max(6, Math.round((count / maxDutyCount) * 100));
                       return (
@@ -1802,6 +2330,13 @@ export default function DutyRoster() {
                   >
                     <Users size={18} />
                     Faculty Directory
+                  </button>
+                  <button
+                    onClick={() => setViewMode('about')}
+                    className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
+                  >
+                    <Info size={18} />
+                    About
                   </button>
                 </nav>
               </div>
@@ -2020,12 +2555,43 @@ export default function DutyRoster() {
                       Faculty Improvement Day (FID)
                     </div>
                     {isEditingFaculty ? (
-                      <input
-                        type="text"
-                        value={facultyEdit.fid}
-                        onChange={(e) => setFacultyEdit(v => ({ ...v, fid: e.target.value }))}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                      />
+                      <div className="space-y-2">
+                        <details className="rounded-lg border border-slate-300 bg-white px-3 py-2">
+                          <summary className="cursor-pointer list-none text-sm text-slate-800 flex items-center justify-between">
+                            <span>
+                              {parseFidDays(facultyEdit.fid).length > 0
+                                ? formatFidDays(parseFidDays(facultyEdit.fid))
+                                : 'Select FID weekdays'}
+                            </span>
+                            <ChevronDown size={16} className="text-slate-500" />
+                          </summary>
+                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {WEEKDAY_OPTIONS.map(option => {
+                              const isSelected = parseFidDays(facultyEdit.fid).includes(option.value);
+                              return (
+                                <label
+                                  key={`fid-option-${option.value}`}
+                                  className="flex items-center justify-between px-2.5 py-2 rounded-md border border-slate-200 hover:border-blue-300 cursor-pointer"
+                                >
+                                  <span className="text-sm text-slate-700">{option.label}</span>
+                                  <span className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => toggleFidDay(option.value)}
+                                      className="h-4 w-4 accent-blue-600"
+                                    />
+                                    {isSelected && <Check size={14} className="text-blue-600" />}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </details>
+                        <div className="text-xs text-slate-500">
+                          Selected days are auto-blocked for roster assignment.
+                        </div>
+                      </div>
                     ) : (
                       <p className="text-slate-900 font-semibold">{selectedFaculty.fid}</p>
                     )}
@@ -2071,19 +2637,100 @@ export default function DutyRoster() {
                       </div>
                       <div>
                         <label className="block text-xs text-slate-600 mb-1">Unavailable</label>
-                        <input
-                          type="text"
-                          value={facultyEdit.unavailable}
-                          onChange={(e) => setFacultyEdit(v => ({ ...v, unavailable: e.target.value }))}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                        />
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <div className="relative flex-1">
+                              <input
+                                ref={unavailableDateInputRef}
+                                type="date"
+                                value={unavailableDateInput}
+                                onChange={(e) => setUnavailableDateInput(e.target.value)}
+                                className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-lg text-sm no-native-calendar-icon"
+                                style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => unavailableDateInputRef.current?.showPicker?.()}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-blue-600"
+                                aria-label="Open calendar"
+                              >
+                                <Calendar size={14} />
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={addUnavailableDate}
+                              className="px-3 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium"
+                            >
+                              Add
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {parseUnavailableDates(facultyEdit.unavailable).length === 0 ? (
+                              <span className="text-xs text-slate-500">No blocked dates selected</span>
+                            ) : (
+                              parseUnavailableDates(facultyEdit.unavailable).map((dateValue) => (
+                                <span
+                                  key={`unavailable-${dateValue}`}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium"
+                                >
+                                  {new Date(`${dateValue}T00:00:00`).toLocaleDateString('en-GB', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric'
+                                  })}
+                                  <button
+                                    type="button"
+                                    onClick={() => removeUnavailableDate(dateValue)}
+                                    className="text-amber-700 hover:text-amber-900"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                </span>
+                              ))
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ) : (
-                    <p className="text-slate-900">
-                      <span className="font-bold text-2xl text-blue-600">{selectedFaculty.dutyCount}</span>
-                      <span className="text-slate-600 ml-2">total duties assigned</span>
-                    </p>
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <div className="text-slate-500">Short Name</div>
+                          <div className="text-slate-900 font-medium">{selectedFaculty.shortName || '-'}</div>
+                        </div>
+                        <div>
+                          <div className="text-slate-500">Gender</div>
+                          <div className="text-slate-900 font-medium">{selectedFaculty.gender || 'Unspecified'}</div>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500 text-sm mb-1">Unavailable Dates</div>
+                        <div className="flex flex-wrap gap-2">
+                          {parseUnavailableDates(selectedFaculty.unavailable || '').length === 0 ? (
+                            <span className="text-xs text-slate-500">None</span>
+                          ) : (
+                            parseUnavailableDates(selectedFaculty.unavailable || '').map(dateValue => (
+                              <span
+                                key={`view-unavailable-${dateValue}`}
+                                className="inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium"
+                              >
+                                {new Date(`${dateValue}T00:00:00`).toLocaleDateString('en-GB', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: 'numeric'
+                                })}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-slate-900">
+                        <span className="font-bold text-2xl text-blue-600">{selectedFaculty.dutyCount}</span>
+                        <span className="text-slate-600 ml-2">total duties assigned</span>
+                      </p>
+                    </div>
                   )}
                 </div>
 
@@ -2121,6 +2768,389 @@ export default function DutyRoster() {
     );
   }
 
+  if (viewMode === 'about') {
+    return (
+      <div className="min-h-screen theme-root relative" data-theme={theme}>
+        <header className="theme-header border-b sticky top-0 z-50 shadow-sm">
+          <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-8 w-full md:w-auto">
+                <h1 className="text-xl sm:text-2xl font-bold text-slate-900">VIC Duty Roster</h1>
+                <nav className="flex flex-wrap gap-1">
+                  <button
+                    onClick={() => setViewMode('dashboard')}
+                    className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
+                  >
+                    <LayoutDashboard size={18} />
+                    Dashboard
+                  </button>
+                  <button
+                    onClick={() => setViewMode('roster')}
+                    className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
+                  >
+                    <ClipboardList size={18} />
+                    Duty Roster
+                  </button>
+                  <button
+                    onClick={() => setViewMode('directory')}
+                    className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
+                  >
+                    <Users size={18} />
+                    Faculty Directory
+                  </button>
+                  <button
+                    onClick={() => setViewMode('about')}
+                    className="px-4 py-2 rounded-lg bg-blue-100 text-blue-700 font-medium flex items-center gap-2"
+                  >
+                    <Info size={18} />
+                    Documentation
+                  </button>
+                </nav>
+              </div>
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <select
+                  value={theme}
+                  onChange={(e) => setTheme(e.target.value)}
+                  className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                >
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                  <option value="solar">Solar</option>
+                  <option value="cool">Cool</option>
+                </select>
+                <button
+                  onClick={handleLogout}
+                  className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors text-sm font-medium"
+                >
+                  Logout
+                </button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-8 space-y-8">
+          
+          {/* Header Section */}
+          <section className="theme-card rounded-2xl p-8 border border-blue-200/40">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center text-2xl shadow-lg">
+                VIC
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold text-slate-900">Duty Roster System</h1>
+                <p className="text-slate-600 mt-1">Complete Documentation & User Guide</p>
+              </div>
+            </div>
+            <p className="text-slate-700 leading-relaxed max-w-4xl">
+              This comprehensive guide covers everything you need to know about the VIC Duty Roster System. 
+              Learn how to create examination duty rosters efficiently, manage faculty availability, maintain 
+              fair workload distribution, and generate professional printable outputs.
+            </p>
+          </section>
+
+          {/* Quick Start Guide */}
+          <section className="theme-card rounded-2xl p-8 border border-blue-200/30">
+            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
+              <Calendar size={24} className="text-blue-600" />
+              Quick Start Guide
+            </h2>
+            <p className="text-sm text-slate-600 mb-6">
+              Follow these 7 steps to create your first duty roster from start to finish
+            </p>
+            
+            <div className="space-y-6">
+              {ABOUT_SECTIONS.quickStart.map((item) => (
+                <div key={item.step} className="theme-panel rounded-xl p-6 border border-slate-200">
+                  <div className="flex items-start gap-4">
+                    <div className="h-10 w-10 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center flex-shrink-0">
+                      {item.step}
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-bold text-slate-900 mb-2">{item.title}</h3>
+                      
+                      <div className="space-y-3">
+                        <div>
+                          <span className="inline-block px-2 py-1 bg-blue-100 text-blue-800 text-xs font-semibold rounded mb-1">
+                            WHAT
+                          </span>
+                          <p className="text-sm text-slate-700">{item.what}</p>
+                        </div>
+                        
+                        <div>
+                          <span className="inline-block px-2 py-1 bg-emerald-100 text-emerald-800 text-xs font-semibold rounded mb-1">
+                            HOW
+                          </span>
+                          <p className="text-sm text-slate-700">{item.how}</p>
+                        </div>
+                        
+                        <div>
+                          <span className="inline-block px-2 py-1 bg-amber-100 text-amber-800 text-xs font-semibold rounded mb-1">
+                            WHY
+                          </span>
+                          <p className="text-sm text-slate-700">{item.why}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Duty Roster Module */}
+          <section className="theme-card rounded-2xl p-8 border border-blue-200/30">
+            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
+              <ClipboardList size={24} className="text-blue-600" />
+              Duty Roster Module
+            </h2>
+            <p className="text-slate-700 mb-6">{ABOUT_SECTIONS.dutyRosterModule.overview}</p>
+            
+            <div className="space-y-5">
+              {ABOUT_SECTIONS.dutyRosterModule.features.map((feature) => (
+                <div key={feature.name} className="theme-panel rounded-lg p-5 border border-slate-200">
+                  <h3 className="font-bold text-slate-900 mb-2">{feature.name}</h3>
+                  <p className="text-sm text-slate-700 mb-3">{feature.description}</p>
+                  <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-blue-500">
+                    <p className="text-xs font-semibold text-slate-600 mb-1">Usage:</p>
+                    <p className="text-sm text-slate-700">{feature.usage}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 p-5 theme-panel rounded-lg border border-blue-300/40">
+              <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
+                <AlertCircle size={18} className="text-blue-600" />
+                Pro Tips for Duty Roster
+              </h3>
+              <ul className="space-y-2">
+                {ABOUT_SECTIONS.dutyRosterModule.tips.map((tip, idx) => (
+                  <li key={idx} className="flex gap-2 text-sm text-slate-700 leading-relaxed">
+                    <span className="text-blue-600 font-bold">•</span>
+                    <span>{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+
+          {/* Faculty Directory Module */}
+          <section className="theme-card rounded-2xl p-8 border border-blue-200/30">
+            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
+              <Users size={24} className="text-blue-600" />
+              Faculty Directory Module
+            </h2>
+            <p className="text-slate-700 mb-6">{ABOUT_SECTIONS.facultyDirectoryModule.overview}</p>
+            
+            <div className="space-y-5">
+              {ABOUT_SECTIONS.facultyDirectoryModule.features.map((feature) => (
+                <div key={feature.name} className="theme-panel rounded-lg p-5 border border-slate-200">
+                  <h3 className="font-bold text-slate-900 mb-2">{feature.name}</h3>
+                  <p className="text-sm text-slate-700 mb-3">{feature.description}</p>
+                  <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-emerald-500">
+                    <p className="text-xs font-semibold text-slate-600 mb-1">Usage:</p>
+                    <p className="text-sm text-slate-700">{feature.usage}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 p-5 theme-panel rounded-lg border border-emerald-300/40">
+              <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
+                <AlertCircle size={18} className="text-emerald-600" />
+                Pro Tips for Faculty Directory
+              </h3>
+              <ul className="space-y-2">
+                {ABOUT_SECTIONS.facultyDirectoryModule.tips.map((tip, idx) => (
+                  <li key={idx} className="flex gap-2 text-sm text-slate-700 leading-relaxed">
+                    <span className="text-emerald-600 font-bold">•</span>
+                    <span>{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+
+          {/* Dashboard Module */}
+          <section className="theme-card rounded-2xl p-8 border border-blue-200/30">
+            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
+              <LayoutDashboard size={24} className="text-blue-600" />
+              Dashboard Module
+            </h2>
+            <p className="text-slate-700 mb-6">{ABOUT_SECTIONS.dashboardModule.overview}</p>
+            
+            <div className="space-y-5">
+              {ABOUT_SECTIONS.dashboardModule.features.map((feature) => (
+                <div key={feature.name} className="theme-panel rounded-lg p-5 border border-slate-200">
+                  <h3 className="font-bold text-slate-900 mb-2">{feature.name}</h3>
+                  <p className="text-sm text-slate-700 mb-3">{feature.description}</p>
+                  <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-violet-500">
+                    <p className="text-xs font-semibold text-slate-600 mb-1">Usage:</p>
+                    <p className="text-sm text-slate-700">{feature.usage}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 p-5 theme-panel rounded-lg border border-violet-300/40">
+              <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
+                <AlertCircle size={18} className="text-violet-600" />
+                Pro Tips for Dashboard
+              </h3>
+              <ul className="space-y-2">
+                {ABOUT_SECTIONS.dashboardModule.tips.map((tip, idx) => (
+                  <li key={idx} className="flex gap-2 text-sm text-slate-700 leading-relaxed">
+                    <span className="text-violet-600 font-bold">•</span>
+                    <span>{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+
+          {/* Advanced Features */}
+          <section className="theme-card rounded-2xl p-8 border border-blue-200/30">
+            <h2 className="text-2xl font-bold text-slate-900 mb-6">Advanced Features</h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {ABOUT_SECTIONS.advancedFeatures.map((feature) => (
+                <div key={feature.name} className="theme-panel rounded-lg p-5 border border-slate-200">
+                  <h3 className="font-bold text-slate-900 mb-2">{feature.name}</h3>
+                  <p className="text-sm text-slate-700 mb-3">{feature.description}</p>
+                  <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-700">
+                    {feature.usage}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Best Practices */}
+          <section className="theme-card rounded-2xl p-8 border border-amber-200/40 bg-gradient-to-br from-amber-50 to-orange-50">
+            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
+              <TrendingUp size={24} className="text-amber-600" />
+              Best Practices for Duty Management
+            </h2>
+            <p className="text-slate-600 mb-6">Professional recommendations for maintaining an efficient and fair duty roster system</p>
+            
+            <div className="space-y-4">
+              {ABOUT_SECTIONS.bestPractices.map((practice, idx) => (
+                <div key={idx} className="theme-panel rounded-lg p-5 border border-amber-200">
+                  <div className="flex gap-3">
+                    <div className="h-8 w-8 rounded-full bg-amber-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-sm">
+                      {idx + 1}
+                    </div>
+                    <p className="text-sm text-slate-800 leading-relaxed pt-1">{practice}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Troubleshooting */}
+          <section className="theme-card rounded-2xl p-8 border border-red-200/40">
+            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
+              <AlertCircle size={24} className="text-red-600" />
+              Troubleshooting Common Issues
+            </h2>
+            <p className="text-slate-600 mb-6">Solutions to frequently encountered problems</p>
+            
+            <div className="space-y-4">
+              {ABOUT_SECTIONS.troubleshooting.map((item, idx) => (
+                <div key={idx} className="theme-panel rounded-lg p-5 border border-red-100">
+                  <h3 className="font-bold text-red-900 mb-2 flex items-center gap-2">
+                    <span className="h-6 w-6 rounded-full bg-red-100 text-red-700 text-xs flex items-center justify-center">
+                      ?
+                    </span>
+                    {item.problem}
+                  </h3>
+                  <div className="ml-8 p-4 theme-card rounded-lg border border-emerald-300/40">
+                    <p className="text-xs font-semibold text-emerald-600 mb-1">SOLUTION:</p>
+                    <p className="text-sm text-slate-700 leading-relaxed">{item.solution}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Technical Details */}
+          <section className="theme-card rounded-2xl p-8 border border-slate-200">
+            <h2 className="text-2xl font-bold text-slate-900 mb-6">Technical Details</h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="theme-panel rounded-lg p-5 border border-slate-200">
+                <h3 className="font-bold text-slate-900 mb-2">Data Storage</h3>
+                <p className="text-sm text-slate-700">{ABOUT_SECTIONS.technicalDetails.storage}</p>
+              </div>
+              
+              <div className="theme-panel rounded-lg p-5 border border-slate-200">
+                <h3 className="font-bold text-slate-900 mb-2">Data Structure</h3>
+                <p className="text-sm text-slate-700">{ABOUT_SECTIONS.technicalDetails.dataStructure}</p>
+              </div>
+              
+              <div className="theme-panel rounded-lg p-5 border border-slate-200">
+                <h3 className="font-bold text-slate-900 mb-2">Browser Compatibility</h3>
+                <p className="text-sm text-slate-700">{ABOUT_SECTIONS.technicalDetails.compatibility}</p>
+              </div>
+              
+              <div className="theme-panel rounded-lg p-5 border border-slate-200">
+                <h3 className="font-bold text-slate-900 mb-2">Performance</h3>
+                <p className="text-sm text-slate-700">{ABOUT_SECTIONS.technicalDetails.performance}</p>
+              </div>
+              
+              <div className="theme-panel rounded-lg p-5 border border-slate-200 md:col-span-2">
+                <h3 className="font-bold text-slate-900 mb-2">Security & Privacy</h3>
+                <p className="text-sm text-slate-700">{ABOUT_SECTIONS.technicalDetails.security}</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Glossary */}
+          <section className="theme-card rounded-2xl p-8 border border-indigo-200/40">
+            <h2 className="text-2xl font-bold text-slate-900 mb-6">Glossary of Terms</h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {ABOUT_SECTIONS.glossary.map((item) => (
+                <div key={item.term} className="theme-panel rounded-lg p-4 border border-indigo-100">
+                  <h3 className="font-bold text-indigo-900 text-sm mb-1">{item.term}</h3>
+                  <p className="text-sm text-slate-700">{item.definition}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Footer */}
+          <section className="theme-card rounded-2xl p-8 border border-slate-200 text-center">
+            <h2 className="text-xl font-bold text-slate-900 mb-3">About This System</h2>
+            <p className="text-slate-700 mb-4 max-w-3xl mx-auto">
+              The VIC Duty Roster System was developed to streamline examination duty allocation 
+              at Victoria Institution (College). It replaces manual spreadsheet-based processes with 
+              an intelligent, automated system that ensures fair distribution and respects faculty availability.
+            </p>
+            <div className="flex flex-wrap gap-3 justify-center text-sm text-slate-600">
+              <span>Version 1.0.0</span>
+              <span>•</span>
+              <span>Released February 2026</span>
+              <span>•</span>
+              <span>Built with Next.js & React</span>
+            </div>
+            <div className="mt-6 pt-6 border-t border-slate-200">
+              <p className="text-sm text-slate-600">
+                Developed by <span className="font-semibold text-slate-900">Dr. Mainul Hossain</span>
+                {' '}with assistance from AI technology
+              </p>
+              <p className="text-xs text-slate-500 mt-2">
+                For support or feature requests, contact the system administrator
+              </p>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    );
+  }
+
   // Duty Roster View with Drag-Drop
   return (
     <div className="min-h-screen theme-root" data-theme={theme}>
@@ -2150,6 +3180,13 @@ export default function DutyRoster() {
                 >
                   <Users size={18} />
                   Faculty Directory
+                </button>
+                <button
+                  onClick={() => setViewMode('about')}
+                  className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
+                >
+                  <Info size={18} />
+                  About
                 </button>
               </nav>
             </div>
@@ -2511,19 +3548,8 @@ function ShiftCard({
           <h3 className="font-semibold text-slate-900">Examination Rooms</h3>
         </div>
 
-        {rooms.map((room, index) => (
+        {rooms.map((room) => (
           <div key={room.id} className="border-2 border-slate-200 rounded-lg p-4 hover:border-blue-300 transition-colors bg-slate-50/50">
-            {index === 0 && (
-              <div className="mb-3 flex justify-end">
-                <button
-                  onClick={addRoom}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-sm font-medium transition-colors"
-                >
-                  <Plus size={16} />
-                  Add Room
-                </button>
-              </div>
-            )}
             <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-4">
               <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
@@ -2643,17 +3669,15 @@ function ShiftCard({
           </div>
         ))}
 
-        {rooms.length === 0 && (
-          <div className="pt-2">
-            <button
-              onClick={addRoom}
-              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-sm font-medium transition-colors"
-            >
-              <Plus size={16} />
-              Add Room
-            </button>
-          </div>
-        )}
+        <div className="pt-2 flex justify-end">
+          <button
+            onClick={addRoom}
+            className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-sm font-medium transition-colors"
+          >
+            <Plus size={16} />
+            Add Room
+          </button>
+        </div>
       </div>
     </div>
   );
