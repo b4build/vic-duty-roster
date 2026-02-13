@@ -1,10 +1,10 @@
 "use client";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, Users, Printer, Trash2, Plus, Search, Filter, X, ChevronDown, Clock, Building2, UserCircle2, AlertCircle, ClipboardList, DoorOpen, UserCheck, GripVertical, History, LayoutDashboard, TrendingUp, Share2, Copy, Check, Info } from 'lucide-react';
+import { Calendar, Users, Printer, Trash2, Plus, Search, Filter, X, ChevronDown, Clock, Building2, UserCircle2, User, AlertCircle, ClipboardList, DoorOpen, UserCheck, GripVertical, History, LayoutDashboard, TrendingUp, Share2, Copy, Check, Info } from 'lucide-react';
 import facultyData from '@/lib/faculty-data.json';
 import { Faculty, Room, InvigilatorSlot, DragItem, DutyAssignment, ShiftData } from '@/lib/types';
-import { saveDutyAssignment, getDutyAssignmentByDate, updateDutyCounts, initializeFacultyData, getAllFaculty, getDutyHistoryByFaculty, getAllDutyAssignments, getAllDutyHistory, resetDutyCountsForDate, resetAllDutyCounts, exportBackupData, importBackupData, deleteDutyAssignment, clearAllDutyAssignments, replaceFacultyData, updateFacultyRecord } from '@/lib/db-utils';
+import { saveDutyAssignment, getDutyAssignmentByDate, updateDutyCounts, initializeFacultyData, getAllFaculty, getDutyHistoryByFaculty, getAllDutyAssignments, getAllDutyHistory, resetDutyCountsForDate, resetAllDutyCounts, exportBackupData, importBackupData, deleteDutyAssignment, clearAllDutyAssignments, replaceFacultyData, updateFacultyRecord, syncFacultyMetadataFromSeed } from '@/lib/db-utils';
 
 type ViewMode = 'roster' | 'directory' | 'dashboard' | 'about';
 type FacultySortBy = 'name' | 'department' | 'designation' | 'dutyCount' | 'fid';
@@ -696,6 +696,7 @@ export default function DutyRoster() {
 
   useEffect(() => {
     initializeFacultyData(facultyData as Faculty[]);
+    syncFacultyMetadataFromSeed(facultyData as Faculty[]);
     // Refresh memoized faculty reads after localStorage bootstrap.
     setDataVersion(v => v + 1);
     const filtered = getAvailableFacultyByDate(selectedDate, getAllFaculty());
@@ -3471,27 +3472,37 @@ export default function DutyRoster() {
                         key={`avail-${faculty.id}`}
                         draggable={!isCompactScreen}
                         onDragStart={(e) => handleDragStart(e, { type: 'faculty', facultyName: faculty.name })}
-                        className={`px-4 py-3 bg-slate-50 hover:bg-blue-50 rounded-lg transition-colors group border border-transparent hover:border-blue-200 ${isCompactScreen ? '' : 'cursor-move'}`}
+                        className={`theme-panel px-4 py-3 rounded-xl transition-all group border border-slate-200 hover:border-blue-300 hover:bg-slate-50/50 ${isCompactScreen ? '' : 'cursor-move'}`}
                       >
-                        <div className="flex items-center gap-2">
-                          <GripVertical size={16} className="text-slate-400 group-hover:text-blue-500" />
+                        <div className="flex items-start gap-3">
+                          <GripVertical size={15} className="mt-1 text-slate-400 group-hover:text-blue-500" />
                           <div className="flex-1">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="font-medium text-slate-900 text-sm group-hover:text-blue-600">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="font-semibold text-slate-900 text-[18px] leading-tight group-hover:text-blue-700">
                                 {faculty.name}
                               </div>
-                              <div className="flex items-center gap-2">
-                                {getFacultyShiftLabel(faculty) && (
-                                  <div className="text-[11px] font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
-                                    {getFacultyShiftLabel(faculty)}
-                                  </div>
-                                )}
-                                <div className="text-[11px] font-semibold text-slate-600 bg-slate-200/70 px-2 py-0.5 rounded-full">
-                                  Duties {faculty.dutyCount || 0}
-                                </div>
+                              <div className="text-xs font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-300 whitespace-nowrap">
+                                Duties {faculty.dutyCount || 0}
                               </div>
                             </div>
-                            <div className="text-xs text-slate-600 mt-1">{faculty.department}</div>
+                            <div className="text-sm text-slate-600 mt-1">{faculty.department}</div>
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              {faculty.gender && (
+                                <div className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
+                                  faculty.gender === 'Female'
+                                    ? 'text-slate-700 bg-slate-100 border-slate-300'
+                                    : 'text-blue-700 bg-blue-100 border-blue-200'
+                                }`}>
+                                  {faculty.gender === 'Female' ? <UserCircle2 size={11} /> : <User size={11} />}
+                                  {faculty.gender}
+                                </div>
+                              )}
+                              {getFacultyShiftLabel(faculty) && (
+                                <div className="text-[11px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-full">
+                                  {getFacultyShiftLabel(faculty)}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>

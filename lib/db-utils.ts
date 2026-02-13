@@ -124,6 +124,37 @@ export const replaceFacultyData = (faculty: Faculty[]): void => {
   localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(faculty));
 };
 
+export const syncFacultyMetadataFromSeed = (seedData: Faculty[]): boolean => {
+  if (typeof window === 'undefined') return false;
+  const existing = getAllFaculty();
+  if (!Array.isArray(existing) || existing.length === 0) return false;
+
+  const byId = new Map(seedData.map(f => [f.id, f]));
+  const byName = new Map(seedData.map(f => [f.name.toLowerCase(), f]));
+  let changed = false;
+
+  const merged = existing.map(f => {
+    const seed = byId.get(f.id) || byName.get(f.name.toLowerCase());
+    if (!seed) return f;
+
+    const next = { ...f };
+    if (!next.gender && seed.gender) {
+      next.gender = seed.gender;
+      changed = true;
+    }
+    if (!next.facultyShift && seed.facultyShift) {
+      next.facultyShift = seed.facultyShift;
+      changed = true;
+    }
+    return next;
+  });
+
+  if (changed) {
+    localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(merged));
+  }
+  return changed;
+};
+
 // Generate duty history from assignment
 export const generateDutyHistoryFromAssignment = (assignment: DutyAssignment): DutyHistory[] => {
   const history: DutyHistory[] = [];
