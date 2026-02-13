@@ -3397,42 +3397,22 @@ export default function DutyRoster() {
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-8 w-full md:w-auto">
                 <h1 className="text-xl sm:text-2xl font-bold text-slate-900">VIC Duty Roster</h1>
                 <nav className="flex flex-wrap gap-1">
-                  <button
-                    onClick={() => setViewMode('dashboard')}
-                    className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
-                  >
-                    <LayoutDashboard size={18} />
-                    Dashboard
+                  <button onClick={() => setViewMode('dashboard')} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2">
+                    <LayoutDashboard size={18} />Dashboard
                   </button>
-                  <button
-                    onClick={() => setViewMode('roster')}
-                    className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
-                  >
-                    <ClipboardList size={18} />
-                    Duty Roster
+                  <button onClick={() => setViewMode('roster')} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2">
+                    <ClipboardList size={18} />Duty Roster
                   </button>
-                  <button
-                    onClick={() => setViewMode('directory')}
-                    className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2"
-                  >
-                    <Users size={18} />
-                    Faculty Directory
+                  <button onClick={() => setViewMode('directory')} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2">
+                    <Users size={18} />Faculty Directory
                   </button>
-                  <button
-                    onClick={() => setViewMode('about')}
-                    className="px-4 py-2 rounded-lg bg-blue-100 text-blue-700 font-medium flex items-center gap-2"
-                  >
-                    <Info size={18} />
-                    Documentation
+                  <button onClick={() => setViewMode('about')} className="px-4 py-2 rounded-lg bg-blue-100 text-blue-700 font-medium flex items-center gap-2">
+                    <Info size={18} />Documentation
                   </button>
                 </nav>
               </div>
               <div className="flex items-center gap-2 w-full md:w-auto">
-                <select
-                  value={theme}
-                  onChange={(e) => setTheme(e.target.value)}
-                  className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                >
+                <select value={theme} onChange={(e) => setTheme(e.target.value)} className="px-3 py-2 rounded-lg border border-slate-300 text-sm">
                   <option value="light">Light</option>
                   <option value="dark">Dark</option>
                   <option value="nord">Nord</option>
@@ -3441,10 +3421,7 @@ export default function DutyRoster() {
                   <option value="cool">Cool</option>
                   <option value="latte">Latte</option>
                 </select>
-                <button
-                  onClick={handleLogout}
-                  className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors text-sm font-medium"
-                >
+                <button onClick={handleLogout} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors text-sm font-medium">
                   Logout
                 </button>
               </div>
@@ -3452,320 +3429,181 @@ export default function DutyRoster() {
           </div>
         </header>
 
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-8 space-y-8">
-          
-          {/* Header Section */}
-          <section className="theme-card rounded-2xl p-8 border border-blue-200/40">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center text-2xl shadow-lg">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-8 space-y-6">
+
+          {/* Header */}
+          <section className="theme-card rounded-2xl p-6 border border-blue-200/40">
+            <div className="flex items-center gap-4 mb-3">
+              <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center text-lg shadow-lg">
                 VIC
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-slate-900">Duty Roster System</h1>
-                <p className="text-slate-600 mt-1">Complete Documentation & User Guide</p>
+                <h1 className="text-2xl font-bold text-slate-900">Duty Roster System</h1>
+                <p className="text-slate-500 text-sm mt-0.5">User Guide & Documentation</p>
               </div>
             </div>
-            <p className="text-slate-700 leading-relaxed max-w-4xl">
-              This comprehensive guide covers everything you need to know about the VIC Duty Roster System. 
-              Learn how to create examination duty rosters efficiently, manage faculty availability, maintain 
-              fair workload distribution, and generate professional printable outputs.
+            <p className="text-sm text-slate-700 leading-relaxed max-w-3xl">
+              The VIC Duty Roster System streamlines examination duty allocation at Victoria Institution (College) — replacing manual spreadsheets with intelligent, availability-aware scheduling and fair workload tracking.
             </p>
           </section>
 
-          {/* Quick Start Guide */}
-          <section className="theme-card rounded-2xl p-8 border border-blue-200/30">
-            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
-              <Calendar size={24} className="text-blue-600" />
-              Quick Start Guide
+          {/* Quick Start */}
+          <section className="theme-card rounded-2xl p-6 border border-blue-200/30">
+            <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <Calendar size={20} className="text-blue-600" />
+              Quick Start — 7 Steps
             </h2>
-            <p className="text-sm text-slate-600 mb-6">
-              Follow these 7 steps to create your first duty roster from start to finish
-            </p>
-            
-            <div className="space-y-6">
+            <div className="space-y-3">
               {ABOUT_SECTIONS.quickStart.map((item) => (
-                <div key={item.step} className="theme-panel rounded-xl p-6 border border-slate-200">
-                  <div className="flex items-start gap-4">
-                    <div className="h-10 w-10 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center flex-shrink-0">
-                      {item.step}
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="text-lg font-bold text-slate-900 mb-2">{item.title}</h3>
-                      
-                      <div className="space-y-3">
-                        <div>
-                          <span className="quickstart-badge quickstart-badge-what inline-block px-2 py-1 text-xs font-semibold rounded mb-1">
-                            WHAT
-                          </span>
-                          <p className="text-sm text-slate-700">{item.what}</p>
-                        </div>
-                        
-                        <div>
-                          <span className="quickstart-badge quickstart-badge-how inline-block px-2 py-1 text-xs font-semibold rounded mb-1">
-                            HOW
-                          </span>
-                          <p className="text-sm text-slate-700">{item.how}</p>
-                        </div>
-                        
-                        <div>
-                          <span className="quickstart-badge quickstart-badge-why inline-block px-2 py-1 text-xs font-semibold rounded mb-1">
-                            WHY
-                          </span>
-                          <p className="text-sm text-slate-700">{item.why}</p>
-                        </div>
-                      </div>
-                    </div>
+                <div key={item.step} className="theme-panel rounded-lg p-4 border border-slate-200 flex gap-3">
+                  <div className="h-7 w-7 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-xs">
+                    {item.step}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-900 text-sm">{item.title}</p>
+                    <p className="text-xs text-slate-600 mt-0.5">{item.what}</p>
                   </div>
                 </div>
               ))}
             </div>
           </section>
 
-          {/* Duty Roster Module */}
-          <section className="theme-card rounded-2xl p-8 border border-blue-200/30">
-            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
-              <ClipboardList size={24} className="text-blue-600" />
-              Duty Roster Module
+          {/* Module Overview */}
+          <section className="theme-card rounded-2xl p-6 border border-blue-200/30">
+            <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <LayoutDashboard size={20} className="text-blue-600" />
+              Module Overview
             </h2>
-            <p className="text-slate-700 mb-6">{ABOUT_SECTIONS.dutyRosterModule.overview}</p>
-            
-            <div className="space-y-5">
-              {ABOUT_SECTIONS.dutyRosterModule.features.map((feature) => (
-                <div key={feature.name} className="theme-panel rounded-lg p-5 border border-slate-200">
-                  <h3 className="font-bold text-slate-900 mb-2">{feature.name}</h3>
-                  <p className="text-sm text-slate-700 mb-3">{feature.description}</p>
-                  <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-blue-500">
-                    <p className="text-xs font-semibold text-slate-600 mb-1">Usage:</p>
-                    <p className="text-sm text-slate-700">{feature.usage}</p>
-                  </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="theme-panel rounded-xl p-4 border border-slate-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <ClipboardList size={16} className="text-blue-600" />
+                  <h3 className="font-bold text-slate-900 text-sm">Duty Roster</h3>
                 </div>
-              ))}
+                <p className="text-xs text-slate-600 mb-3">{ABOUT_SECTIONS.dutyRosterModule.overview}</p>
+                <ul className="space-y-1">
+                  {ABOUT_SECTIONS.dutyRosterModule.features.map(f => (
+                    <li key={f.name} className="text-xs text-slate-700 flex gap-1.5">
+                      <span className="text-blue-500 font-bold mt-0.5 flex-shrink-0">›</span>
+                      <span><span className="font-semibold">{f.name}:</span> {f.description}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="theme-panel rounded-xl p-4 border border-slate-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <Users size={16} className="text-emerald-600" />
+                  <h3 className="font-bold text-slate-900 text-sm">Faculty Directory</h3>
+                </div>
+                <p className="text-xs text-slate-600 mb-3">{ABOUT_SECTIONS.facultyDirectoryModule.overview}</p>
+                <ul className="space-y-1">
+                  {ABOUT_SECTIONS.facultyDirectoryModule.features.map(f => (
+                    <li key={f.name} className="text-xs text-slate-700 flex gap-1.5">
+                      <span className="text-emerald-500 font-bold mt-0.5 flex-shrink-0">›</span>
+                      <span><span className="font-semibold">{f.name}:</span> {f.description}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="theme-panel rounded-xl p-4 border border-slate-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp size={16} className="text-violet-600" />
+                  <h3 className="font-bold text-slate-900 text-sm">Dashboard</h3>
+                </div>
+                <p className="text-xs text-slate-600 mb-3">{ABOUT_SECTIONS.dashboardModule.overview}</p>
+                <ul className="space-y-1">
+                  {ABOUT_SECTIONS.dashboardModule.features.map(f => (
+                    <li key={f.name} className="text-xs text-slate-700 flex gap-1.5">
+                      <span className="text-violet-500 font-bold mt-0.5 flex-shrink-0">›</span>
+                      <span><span className="font-semibold">{f.name}:</span> {f.description}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
+          </section>
 
-            <div className="mt-6 p-5 theme-panel rounded-lg border border-blue-300/40">
-              <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
-                <AlertCircle size={18} className="text-blue-600" />
-                Pro Tips for Duty Roster
-              </h3>
+          {/* Best Practices & Troubleshooting */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <section className="theme-card rounded-2xl p-6 border border-amber-300/40">
+              <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                <TrendingUp size={20} className="text-amber-600" />
+                Best Practices
+              </h2>
               <ul className="space-y-2">
-                {ABOUT_SECTIONS.dutyRosterModule.tips.map((tip, idx) => (
-                  <li key={idx} className="flex gap-2 text-sm text-slate-700 leading-relaxed">
-                    <span className="text-blue-600 font-bold">•</span>
-                    <span>{tip}</span>
+                {ABOUT_SECTIONS.bestPractices.map((practice, idx) => (
+                  <li key={idx} className="flex gap-2 text-xs text-slate-700 leading-relaxed">
+                    <span className="text-amber-600 font-bold flex-shrink-0">{idx + 1}.</span>
+                    <span>{practice}</span>
                   </li>
                 ))}
               </ul>
-            </div>
-          </section>
+            </section>
 
-          {/* Faculty Directory Module */}
-          <section className="theme-card rounded-2xl p-8 border border-blue-200/30">
-            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
-              <Users size={24} className="text-blue-600" />
-              Faculty Directory Module
-            </h2>
-            <p className="text-slate-700 mb-6">{ABOUT_SECTIONS.facultyDirectoryModule.overview}</p>
-            
-            <div className="space-y-5">
-              {ABOUT_SECTIONS.facultyDirectoryModule.features.map((feature) => (
-                <div key={feature.name} className="theme-panel rounded-lg p-5 border border-slate-200">
-                  <h3 className="font-bold text-slate-900 mb-2">{feature.name}</h3>
-                  <p className="text-sm text-slate-700 mb-3">{feature.description}</p>
-                  <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-emerald-500">
-                    <p className="text-xs font-semibold text-slate-600 mb-1">Usage:</p>
-                    <p className="text-sm text-slate-700">{feature.usage}</p>
+            <section className="theme-card rounded-2xl p-6 border border-red-200/40">
+              <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                <AlertCircle size={20} className="text-red-600" />
+                Troubleshooting
+              </h2>
+              <div className="space-y-3">
+                {ABOUT_SECTIONS.troubleshooting.map((item, idx) => (
+                  <div key={idx} className="theme-panel rounded-lg p-3 border border-red-200/40">
+                    <p className="text-xs font-semibold text-slate-800 mb-1">{item.problem}</p>
+                    <p className="text-xs text-slate-600 leading-relaxed">{item.solution}</p>
                   </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-6 p-5 theme-panel rounded-lg border border-emerald-300/40">
-              <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
-                <AlertCircle size={18} className="text-emerald-600" />
-                Pro Tips for Faculty Directory
-              </h3>
-              <ul className="space-y-2">
-                {ABOUT_SECTIONS.facultyDirectoryModule.tips.map((tip, idx) => (
-                  <li key={idx} className="flex gap-2 text-sm text-slate-700 leading-relaxed">
-                    <span className="text-emerald-600 font-bold">•</span>
-                    <span>{tip}</span>
-                  </li>
                 ))}
-              </ul>
-            </div>
-          </section>
+              </div>
+            </section>
+          </div>
 
-          {/* Dashboard Module */}
-          <section className="theme-card rounded-2xl p-8 border border-blue-200/30">
-            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
-              <LayoutDashboard size={24} className="text-blue-600" />
-              Dashboard Module
-            </h2>
-            <p className="text-slate-700 mb-6">{ABOUT_SECTIONS.dashboardModule.overview}</p>
-            
-            <div className="space-y-5">
-              {ABOUT_SECTIONS.dashboardModule.features.map((feature) => (
-                <div key={feature.name} className="theme-panel rounded-lg p-5 border border-slate-200">
-                  <h3 className="font-bold text-slate-900 mb-2">{feature.name}</h3>
-                  <p className="text-sm text-slate-700 mb-3">{feature.description}</p>
-                  <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-violet-500">
-                    <p className="text-xs font-semibold text-slate-600 mb-1">Usage:</p>
-                    <p className="text-sm text-slate-700">{feature.usage}</p>
+          {/* Glossary & Technical */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <section className="theme-card glossary-section rounded-2xl p-6 border">
+              <h2 className="text-lg font-bold text-slate-900 mb-4">Glossary</h2>
+              <div className="space-y-2">
+                {ABOUT_SECTIONS.glossary.map((item) => (
+                  <div key={item.term} className="theme-panel glossary-item rounded-lg p-3 border">
+                    <span className="glossary-term font-bold text-xs">{item.term}: </span>
+                    <span className="text-xs text-slate-700">{item.definition}</span>
                   </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-6 p-5 theme-panel rounded-lg border border-violet-300/40">
-              <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
-                <AlertCircle size={18} className="text-violet-600" />
-                Pro Tips for Dashboard
-              </h3>
-              <ul className="space-y-2">
-                {ABOUT_SECTIONS.dashboardModule.tips.map((tip, idx) => (
-                  <li key={idx} className="flex gap-2 text-sm text-slate-700 leading-relaxed">
-                    <span className="text-violet-600 font-bold">•</span>
-                    <span>{tip}</span>
-                  </li>
                 ))}
-              </ul>
-            </div>
-          </section>
+              </div>
+            </section>
 
-          {/* Advanced Features */}
-          <section className="theme-card rounded-2xl p-8 border border-blue-200/30">
-            <h2 className="text-2xl font-bold text-slate-900 mb-6">Advanced Features</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {ABOUT_SECTIONS.advancedFeatures.map((feature) => (
-                <div key={feature.name} className="theme-panel rounded-lg p-5 border border-slate-200">
-                  <h3 className="font-bold text-slate-900 mb-2">{feature.name}</h3>
-                  <p className="text-sm text-slate-700 mb-3">{feature.description}</p>
-                  <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-700">
-                    {feature.usage}
-                  </div>
+            <div className="space-y-6">
+              <section className="theme-card rounded-2xl p-6 border border-slate-200">
+                <h2 className="text-lg font-bold text-slate-900 mb-4">Technical Details</h2>
+                <div className="space-y-3">
+                  <div><p className="text-xs font-semibold text-slate-700 mb-0.5">Data Storage</p><p className="text-xs text-slate-600">{ABOUT_SECTIONS.technicalDetails.storage}</p></div>
+                  <div><p className="text-xs font-semibold text-slate-700 mb-0.5">Browser Compatibility</p><p className="text-xs text-slate-600">{ABOUT_SECTIONS.technicalDetails.compatibility}</p></div>
+                  <div><p className="text-xs font-semibold text-slate-700 mb-0.5">Performance</p><p className="text-xs text-slate-600">{ABOUT_SECTIONS.technicalDetails.performance}</p></div>
+                  <div><p className="text-xs font-semibold text-slate-700 mb-0.5">Security & Privacy</p><p className="text-xs text-slate-600">{ABOUT_SECTIONS.technicalDetails.security}</p></div>
                 </div>
-              ))}
-            </div>
-          </section>
+              </section>
 
-          {/* Best Practices */}
-          <section className="theme-card rounded-2xl p-8 border border-amber-300/40">
-            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
-              <TrendingUp size={24} className="text-amber-600" />
-              Best Practices for Duty Management
-            </h2>
-            <p className="text-slate-600 mb-6">Professional recommendations for maintaining an efficient and fair duty roster system</p>
-            
-            <div className="space-y-4">
-              {ABOUT_SECTIONS.bestPractices.map((practice, idx) => (
-                <div key={idx} className="theme-panel rounded-lg p-5 border border-amber-300/40">
-                  <div className="flex gap-3">
-                    <div className="h-8 w-8 rounded-full bg-amber-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-sm">
-                      {idx + 1}
+              <section className="theme-card rounded-2xl p-6 border border-slate-200">
+                <h2 className="text-lg font-bold text-slate-900 mb-4">Advanced Features</h2>
+                <div className="space-y-2">
+                  {ABOUT_SECTIONS.advancedFeatures.map((f) => (
+                    <div key={f.name} className="theme-panel rounded-lg p-3 border border-slate-200">
+                      <p className="text-xs font-semibold text-slate-800 mb-0.5">{f.name}</p>
+                      <p className="text-xs text-slate-600">{f.description}</p>
                     </div>
-                    <p className="text-sm text-slate-700 leading-relaxed pt-1">{practice}</p>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              </section>
             </div>
-          </section>
-
-          {/* Troubleshooting */}
-          <section className="theme-card rounded-2xl p-8 border border-red-200/40">
-            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
-              <AlertCircle size={24} className="text-red-600" />
-              Troubleshooting Common Issues
-            </h2>
-            <p className="text-slate-600 mb-6">Solutions to frequently encountered problems</p>
-            
-            <div className="space-y-4">
-              {ABOUT_SECTIONS.troubleshooting.map((item, idx) => (
-                <div key={idx} className="theme-panel rounded-lg p-5 border border-red-300/40">
-                  <h3 className="font-bold text-slate-900 mb-2 flex items-center gap-2">
-                    <span className="h-6 w-6 rounded-full bg-red-100 text-red-700 text-xs flex items-center justify-center">
-                      ?
-                    </span>
-                    {item.problem}
-                  </h3>
-                  <div className="ml-8 p-4 theme-card rounded-lg border border-emerald-300/40">
-                    <p className="text-xs font-semibold text-emerald-600 mb-1">SOLUTION:</p>
-                    <p className="text-sm text-slate-700 leading-relaxed">{item.solution}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Technical Details */}
-          <section className="theme-card rounded-2xl p-8 border border-slate-200">
-            <h2 className="text-2xl font-bold text-slate-900 mb-6">Technical Details</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div className="theme-panel rounded-lg p-5 border border-slate-200">
-                <h3 className="font-bold text-slate-900 mb-2">Data Storage</h3>
-                <p className="text-sm text-slate-700">{ABOUT_SECTIONS.technicalDetails.storage}</p>
-              </div>
-              
-              <div className="theme-panel rounded-lg p-5 border border-slate-200">
-                <h3 className="font-bold text-slate-900 mb-2">Data Structure</h3>
-                <p className="text-sm text-slate-700">{ABOUT_SECTIONS.technicalDetails.dataStructure}</p>
-              </div>
-              
-              <div className="theme-panel rounded-lg p-5 border border-slate-200">
-                <h3 className="font-bold text-slate-900 mb-2">Browser Compatibility</h3>
-                <p className="text-sm text-slate-700">{ABOUT_SECTIONS.technicalDetails.compatibility}</p>
-              </div>
-              
-              <div className="theme-panel rounded-lg p-5 border border-slate-200">
-                <h3 className="font-bold text-slate-900 mb-2">Performance</h3>
-                <p className="text-sm text-slate-700">{ABOUT_SECTIONS.technicalDetails.performance}</p>
-              </div>
-              
-              <div className="theme-panel rounded-lg p-5 border border-slate-200 md:col-span-2">
-                <h3 className="font-bold text-slate-900 mb-2">Security & Privacy</h3>
-                <p className="text-sm text-slate-700">{ABOUT_SECTIONS.technicalDetails.security}</p>
-              </div>
-            </div>
-          </section>
-
-          {/* Glossary */}
-          <section className="theme-card glossary-section rounded-2xl p-8 border">
-            <h2 className="text-2xl font-bold text-slate-900 mb-6">Glossary of Terms</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {ABOUT_SECTIONS.glossary.map((item) => (
-                <div key={item.term} className="theme-panel glossary-item rounded-lg p-4 border">
-                  <h3 className="glossary-term font-bold text-sm mb-1">{item.term}</h3>
-                  <p className="text-sm text-slate-700">{item.definition}</p>
-                </div>
-              ))}
-            </div>
-          </section>
+          </div>
 
           {/* Footer */}
-          <section className="theme-card rounded-2xl p-8 border border-slate-200 text-center">
-            <h2 className="text-xl font-bold text-slate-900 mb-3">About This System</h2>
-            <p className="text-slate-700 mb-4 max-w-3xl mx-auto">
-              The VIC Duty Roster System was developed to streamline examination duty allocation 
-              at Victoria Institution (College). It replaces manual spreadsheet-based processes with 
-              an intelligent, automated system that ensures fair distribution and respects faculty availability.
+          <section className="theme-card rounded-2xl p-6 border border-slate-200 text-center">
+            <p className="text-sm text-slate-600 mb-2">
+              Developed by <span className="font-semibold text-slate-900">Dr. Mainul Hossain</span> with assistance from AI technology
             </p>
-            <div className="flex flex-wrap gap-3 justify-center text-sm text-slate-600">
-              <span>Version 1.0.0</span>
-              <span>•</span>
-              <span>Released February 2026</span>
-              <span>•</span>
+            <div className="flex flex-wrap gap-2 justify-center text-xs text-slate-500">
+              <span>Version 1.0.0</span><span>•</span>
+              <span>Released February 2026</span><span>•</span>
               <span>Built with Next.js & React</span>
-            </div>
-            <div className="mt-6 pt-6 border-t border-slate-200">
-              <p className="text-sm text-slate-600">
-                Developed by <span className="font-semibold text-slate-900">Dr. Mainul Hossain</span>
-                {' '}with assistance from AI technology
-              </p>
-              <p className="text-xs text-slate-500 mt-2">
-                For support or feature requests, contact the system administrator
-              </p>
             </div>
           </section>
 
