@@ -560,6 +560,12 @@ export default function DutyRoster() {
     state: 'idle',
     message: 'Waiting for cloud sync'
   });
+  const [toolNotice, setToolNotice] = useState<{
+    tone: 'success' | 'error' | 'warning' | 'info';
+    message: string;
+  } | null>(null);
+  const [isImportingBackup, setIsImportingBackup] = useState(false);
+  const [isImportingFaculty, setIsImportingFaculty] = useState(false);
   const unavailableDateInputRef = useRef<HTMLInputElement | null>(null);
   const newUnavailableDateInputRef = useRef<HTMLInputElement | null>(null);
   const allFaculty = useMemo(() => getAllFaculty(), [dataVersion]);
@@ -1022,6 +1028,34 @@ export default function DutyRoster() {
   const dutyFairnessScore = Math.max(0, Math.min(100, Math.round(100 / (1 + cvRatio))));
   const MIN_DUTIES_FOR_FAIRNESS = 20;
   const isFairnessReliable = allHistory.length >= MIN_DUTIES_FOR_FAIRNESS;
+  const cloudStatusTone =
+    blobSyncStatus.state === 'synced'
+      ? 'success'
+      : blobSyncStatus.state === 'syncing'
+        ? 'info'
+        : blobSyncStatus.state === 'error'
+          ? 'error'
+          : blobSyncStatus.state === 'disabled'
+            ? 'warning'
+            : 'info';
+  const cloudStatusClasses =
+    cloudStatusTone === 'success'
+      ? 'border-emerald-400/70 bg-emerald-900/40 text-emerald-100'
+      : cloudStatusTone === 'error'
+        ? 'border-red-400/70 bg-red-900/40 text-red-100'
+        : cloudStatusTone === 'warning'
+          ? 'border-amber-400/80 bg-amber-900/35 text-amber-100'
+          : 'border-blue-400/70 bg-blue-900/40 text-blue-100';
+  const cloudStatusLabel =
+    blobSyncStatus.state === 'synced'
+      ? 'Cloud Synced'
+      : blobSyncStatus.state === 'syncing'
+        ? 'Sync In Progress'
+        : blobSyncStatus.state === 'error'
+          ? 'Cloud Sync Error'
+          : blobSyncStatus.state === 'disabled'
+            ? 'Cloud Sync Disabled'
+            : 'Cloud Sync';
 
   const dateDutySeries = (() => {
     const map = new Map<string, number>();
@@ -1469,6 +1503,19 @@ export default function DutyRoster() {
   };
 
   const downloadRosterCsv = () => {
+    const assignments = getAllDutyAssignments();
+    if (!assignments.length) {
+      const message = 'No saved rosters found. Save at least one roster before exporting CSV.';
+      setToolNotice({ tone: 'warning', message });
+      alert(message);
+      return;
+    }
+    if (!exportAllDates && exportFrom > exportTo) {
+      const message = 'Export range is invalid. "From" date must be before or equal to "To" date.';
+      setToolNotice({ tone: 'warning', message });
+      alert(message);
+      return;
+    }
     const csv = buildRosterCsv();
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -1479,6 +1526,10 @@ export default function DutyRoster() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+    setToolNotice({
+      tone: 'success',
+      message: `CSV export created (${exportAllDates ? 'all dates' : `${exportFrom} to ${exportTo}`}).`
+    });
   };
 
   const handleResetDate = () => {
@@ -1490,6 +1541,7 @@ export default function DutyRoster() {
     loadDutyAssignment(selectedDate);
     setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
     setDataVersion(v => v + 1);
+    setToolNotice({ tone: 'success', message: `Reset completed for ${selectedDate}.` });
     void syncBackupToBlob(['duties', 'history', 'faculty']);
   };
 
@@ -1502,6 +1554,7 @@ export default function DutyRoster() {
     loadDutyAssignment(selectedDate);
     setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
     setDataVersion(v => v + 1);
+    setToolNotice({ tone: 'success', message: 'All roster and duty-count data has been reset.' });
     void syncBackupToBlob(['duties', 'history', 'faculty']);
   };
 
@@ -1725,11 +1778,28 @@ export default function DutyRoster() {
   const handleImportFacultyJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      const message = 'Invalid faculty file. Please select a .json file.';
+      setToolNotice({ tone: 'error', message });
+      alert(message);
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      const message = 'Faculty file is too large. Maximum supported size is 10 MB.';
+      setToolNotice({ tone: 'error', message });
+      alert(message);
+      e.target.value = '';
+      return;
+    }
+    setIsImportingFaculty(true);
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
       if (!Array.isArray(parsed)) {
-        alert('Invalid faculty file. Expected a JSON array.');
+        const message = 'Invalid faculty file. Expected a JSON array.';
+        setToolNotice({ tone: 'error', message });
+        alert(message);
         return;
       }
 
@@ -1779,10 +1849,14 @@ export default function DutyRoster() {
       setAvailableFaculty(getAvailableFacultyByDate(selectedDate, normalized));
       setDataVersion(v => v + 1);
       void syncBackupToBlob(['faculty']);
+      setToolNotice({ tone: 'success', message: `Faculty data imported (${normalized.length} records).` });
       alert('Faculty data updated successfully.');
     } catch (error: any) {
-      alert(error?.message || 'Failed to import faculty data.');
+      const message = error?.message || 'Failed to import faculty data.';
+      setToolNotice({ tone: 'error', message });
+      alert(message);
     } finally {
+      setIsImportingFaculty(false);
       e.target.value = '';
     }
   };
@@ -2143,25 +2217,58 @@ export default function DutyRoster() {
   const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      const message = 'Invalid backup file. Please select a .json file.';
+      setToolNotice({ tone: 'error', message });
+      alert(message);
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      const message = 'Backup file is too large. Maximum supported size is 20 MB.';
+      setToolNotice({ tone: 'error', message });
+      alert(message);
+      e.target.value = '';
+      return;
+    }
     const ok = window.confirm('Import backup and replace current data? This cannot be undone.');
     if (!ok) {
       e.target.value = '';
       return;
     }
+    setIsImportingBackup(true);
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      if (!data || typeof data !== 'object' || !('faculty' in data)) {
-        alert('Invalid backup file.');
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        !('faculty' in data) ||
+        !Array.isArray((data as any).faculty)
+      ) {
+        const message = 'Invalid backup file. Required field "faculty" was not found.';
+        setToolNotice({ tone: 'error', message });
+        alert(message);
         return;
       }
       importBackupData(data);
       clearAllDrafts();
       setDataVersion(v => v + 1);
+      loadDutyAssignment(selectedDate);
+      setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
+      const dutiesCount = Array.isArray((data as any).duties) ? (data as any).duties.length : 0;
+      const facultyCount = (data as any).faculty.length;
+      setToolNotice({
+        tone: 'success',
+        message: `Backup restored (${dutiesCount} duties, ${facultyCount} faculty).`
+      });
       void syncBackupToBlob(['duties', 'history', 'faculty']);
     } catch {
-      alert('Failed to import backup.');
+      const message = 'Failed to import backup. Please verify JSON format and structure.';
+      setToolNotice({ tone: 'error', message });
+      alert(message);
     } finally {
+      setIsImportingBackup(false);
       e.target.value = '';
     }
   };
@@ -2502,130 +2609,195 @@ export default function DutyRoster() {
               </div>
 
               <div className="theme-card rounded-xl p-6">
-                <div className="flex items-center justify-between gap-3 mb-4">
-                  <h2 className="text-lg font-bold text-slate-900">Roster Tools</h2>
-                  <span
-                    className={`text-[11px] px-2.5 py-1 rounded-full border font-semibold ${
-                      blobSyncStatus.state === 'synced'
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        : blobSyncStatus.state === 'syncing'
-                          ? 'bg-blue-50 text-blue-700 border-blue-200'
-                          : blobSyncStatus.state === 'error'
-                            ? 'bg-red-50 text-red-700 border-red-200'
-                            : 'bg-slate-100 text-slate-700 border-slate-200'
-                    }`}
+                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900">Roster Tools</h2>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Export, reset, and data-restore operations with built-in validation.
+                    </p>
+                  </div>
+                  <div
+                    className={`w-full lg:w-auto max-w-full lg:max-w-[320px] rounded-lg border px-3 py-2 ${cloudStatusClasses}`}
                     title={blobSyncStatus.at ? `Last update: ${new Date(blobSyncStatus.at).toLocaleString('en-GB')}` : undefined}
                   >
-                    {blobSyncStatus.message}
-                  </span>
-                </div>
-                <div className="space-y-4">
-                  <div className="text-sm font-semibold text-slate-800">Roster Export</div>
-                  <p className="text-xs text-slate-500 -mt-2">
-                    What: exports roster assignments to CSV. How: choose all dates or a range, then download.
-                  </p>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={exportAllDates}
-                      onChange={(e) => setExportAllDates(e.target.checked)}
-                    />
-                    All dates
-                  </label>
-                  {!exportAllDates && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs text-slate-600 mb-1">From</label>
-                        <input
-                          type="date"
-                          value={exportFrom}
-                          onChange={(e) => setExportFrom(e.target.value)}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                        />
+                    <div className="text-[11px] font-bold uppercase tracking-wide">{cloudStatusLabel}</div>
+                    <div className="text-xs font-semibold leading-5 break-words">{blobSyncStatus.message}</div>
+                    {blobSyncStatus.at && (
+                      <div className="text-[11px] mt-1 opacity-80">
+                        Last update: {new Date(blobSyncStatus.at).toLocaleString('en-GB')}
                       </div>
-                      <div>
-                        <label className="block text-xs text-slate-600 mb-1">To</label>
-                        <input
-                          type="date"
-                          value={exportTo}
-                          onChange={(e) => setExportTo(e.target.value)}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                        />
-                      </div>
-                    </div>
-                  )}
-                  <button
-                    onClick={downloadRosterCsv}
-                    className="w-full px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors"
-                  >
-                    Download CSV
-                  </button>
-
-                  <div className="text-sm font-semibold text-slate-800 pt-4 border-t border-slate-200">Reset</div>
-                  <p className="text-xs text-slate-500 -mt-2">
-                    What: clears saved duties and recalculates duty counts. How: use selected date reset for one day, or reset all for full wipe.
-                  </p>
-                  <div>
-                    <label className="block text-xs text-slate-600 mb-1">Target date</label>
-                    <input
-                      type="date"
-                      value={selectedDate}
-                      onChange={(e) => setSelectedDate(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                    />
+                    )}
                   </div>
-                  <button
-                    onClick={handleResetDate}
-                    className="w-full px-4 py-2 bg-amber-100 text-amber-800 rounded-lg text-sm font-medium hover:bg-amber-200 transition-colors"
-                  >
-                    Reset Selected Date
-                  </button>
-                  <button
-                    onClick={handleResetAll}
-                    className="w-full px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors"
-                  >
-                    Reset All Data
-                  </button>
+                </div>
 
-                  <div className="text-sm font-semibold text-slate-800 pt-4 border-t border-slate-200">Backup & Restore</div>
-                  <p className="text-xs text-slate-500 -mt-2">
-                    What: backup contains duties, history, and faculty master. How: download JSON snapshot, or upload JSON to replace current data.
-                  </p>
-                  <button
-                    onClick={downloadBackup}
-                    className="w-full px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors"
+                {toolNotice && (
+                  <div
+                    className={`mb-4 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                      toolNotice.tone === 'success'
+                        ? 'border-emerald-300 bg-emerald-100 text-emerald-900'
+                        : toolNotice.tone === 'error'
+                          ? 'border-red-300 bg-red-100 text-red-900'
+                          : toolNotice.tone === 'warning'
+                            ? 'border-amber-300 bg-amber-100 text-amber-900'
+                            : 'border-blue-300 bg-blue-100 text-blue-900'
+                    }`}
                   >
-                    Download Backup
-                  </button>
-                  <label className="block text-xs text-slate-600">
-                    Restore from backup
-                    <input
-                      type="file"
-                      accept="application/json"
-                      onChange={handleImportBackup}
-                      className="mt-2 w-full text-xs"
-                    />
-                  </label>
+                    {toolNotice.message}
+                  </div>
+                )}
 
-                  <div className="text-sm font-semibold text-slate-800 pt-4 border-t border-slate-200">Faculty Data</div>
-                  <p className="text-xs text-slate-500 -mt-2">
-                    What: faculty file stores profile/FID/unavailable fields. How: download current master JSON or upload a validated JSON array to replace it.
-                  </p>
-                  <button
-                    onClick={downloadFacultyJson}
-                    className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
-                  >
-                    Download Faculty JSON
-                  </button>
-                  <label className="block text-xs text-slate-600">
-                    Upload faculty JSON
-                    <input
-                      type="file"
-                      accept="application/json"
-                      onChange={handleImportFacultyJson}
-                      className="mt-2 w-full text-xs"
-                    />
-                  </label>
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <section className="theme-panel rounded-lg border border-slate-200 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-slate-900">Roster Export</h3>
+                      <span className="text-[11px] font-semibold text-slate-500">CSV</span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Download roster assignments for all dates or a custom date range.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-700/60 bg-slate-900/40 p-1">
+                      <button
+                        onClick={() => setExportAllDates(true)}
+                        className={`px-3 py-2 text-xs font-semibold rounded-md transition-colors ${
+                          exportAllDates
+                            ? 'bg-cyan-600 text-white'
+                            : 'text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        All Dates
+                      </button>
+                      <button
+                        onClick={() => setExportAllDates(false)}
+                        className={`px-3 py-2 text-xs font-semibold rounded-md transition-colors ${
+                          !exportAllDates
+                            ? 'bg-cyan-600 text-white'
+                            : 'text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        Custom Range
+                      </button>
+                    </div>
+                    {!exportAllDates && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">From</label>
+                          <input
+                            type="date"
+                            value={exportFrom}
+                            onChange={(e) => setExportFrom(e.target.value)}
+                            className="w-full px-3 py-2 border border-slate-500/60 rounded-lg text-sm bg-slate-900/50 text-slate-100"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">To</label>
+                          <input
+                            type="date"
+                            value={exportTo}
+                            onChange={(e) => setExportTo(e.target.value)}
+                            className="w-full px-3 py-2 border border-slate-500/60 rounded-lg text-sm bg-slate-900/50 text-slate-100"
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
+                      {exportAllDates ? 'Scope: all saved duty dates' : `Scope: ${exportFrom} to ${exportTo}`}
+                    </div>
+                    <button
+                      onClick={downloadRosterCsv}
+                      className="w-full px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 transition-colors shadow-sm"
+                    >
+                      Download CSV
+                    </button>
+                  </section>
+
+                  <section className="theme-panel rounded-lg border border-slate-200 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-slate-900">Reset Operations</h3>
+                      <span className="text-[11px] font-semibold text-red-600">Irreversible</span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Remove one date or wipe all saved duties and recompute duty counts.
+                    </p>
+                    <div>
+                      <label className="block text-xs text-slate-600 mb-1">Target date</label>
+                      <input
+                        type="date"
+                        value={selectedDate}
+                        onChange={(e) => setSelectedDate(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-500/60 rounded-lg text-sm bg-slate-900/50 text-slate-100"
+                      />
+                    </div>
+                    <button
+                      onClick={handleResetDate}
+                      className="w-full px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 transition-colors shadow-sm"
+                    >
+                      Reset Selected Date
+                    </button>
+                    <button
+                      onClick={handleResetAll}
+                      className="w-full px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-red-700 to-rose-700 hover:from-red-600 hover:to-rose-600 transition-colors shadow-sm"
+                    >
+                      Reset All Data
+                    </button>
+                  </section>
+
+                  <section className="theme-panel rounded-lg border border-slate-200 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-slate-900">Backup & Restore</h3>
+                      <span className="text-[11px] font-semibold text-slate-500">.json</span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Full backup includes duties, history, and faculty records.
+                    </p>
+                    <button
+                      onClick={downloadBackup}
+                      className="w-full px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 transition-colors shadow-sm"
+                    >
+                      Download Backup
+                    </button>
+                    <label className="block text-xs text-slate-600">
+                      Restore from backup
+                      <input
+                        type="file"
+                        accept="application/json"
+                        onChange={handleImportBackup}
+                        disabled={isImportingBackup}
+                        className="mt-2 block w-full rounded-md border border-slate-500/60 bg-slate-900/50 px-2 py-1.5 text-xs text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-1.5 file:text-white file:font-semibold hover:file:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                      />
+                    </label>
+                    {isImportingBackup && (
+                      <div className="text-xs text-blue-700 font-semibold">Importing backup...</div>
+                    )}
+                  </section>
+
+                  <section className="theme-panel rounded-lg border border-slate-200 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-slate-900">Faculty Data</h3>
+                      <span className="text-[11px] font-semibold text-slate-500">Master</span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Export faculty master or replace it using a validated JSON array.
+                    </p>
+                    <button
+                      onClick={downloadFacultyJson}
+                      className="w-full px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 transition-colors shadow-sm"
+                    >
+                      Download Faculty JSON
+                    </button>
+                    <label className="block text-xs text-slate-600">
+                      Upload faculty JSON
+                      <input
+                        type="file"
+                        accept="application/json"
+                        onChange={handleImportFacultyJson}
+                        disabled={isImportingFaculty}
+                        className="mt-2 block w-full rounded-md border border-slate-500/60 bg-slate-900/50 px-2 py-1.5 text-xs text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-white file:font-semibold hover:file:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                      />
+                    </label>
+                    {isImportingFaculty && (
+                      <div className="text-xs text-indigo-700 font-semibold">Importing faculty JSON...</div>
+                    )}
+                  </section>
                 </div>
               </div>
             </div>
@@ -4269,4 +4441,3 @@ function ShiftCard({
     </div>
   );
 }
-
