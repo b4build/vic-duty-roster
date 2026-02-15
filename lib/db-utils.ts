@@ -290,7 +290,29 @@ export const importBackupData = (data: {
   history?: DutyHistory[];
   faculty?: Faculty[];
 }): void => {
-  localStorage.setItem(STORAGE_KEYS.DUTIES, JSON.stringify(data.duties || []));
-  localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(data.history || []));
-  localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(data.faculty || []));
+  const duties = Array.isArray(data.duties) ? data.duties : [];
+  const history = Array.isArray(data.history) ? data.history : [];
+  const faculty = Array.isArray(data.faculty) ? data.faculty : [];
+
+  // Persist base sections first so derivation helpers can resolve faculty names.
+  localStorage.setItem(STORAGE_KEYS.DUTIES, JSON.stringify(duties));
+  localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(faculty));
+
+  // Prefer rebuilding history from duties to avoid importing stale/incomplete history.
+  const effectiveHistory = duties.length > 0
+    ? duties.flatMap(assignment => generateDutyHistoryFromAssignment(assignment))
+    : history;
+
+  const countsByFacultyId = new Map<string, number>();
+  effectiveHistory.forEach(entry => {
+    countsByFacultyId.set(entry.facultyId, (countsByFacultyId.get(entry.facultyId) || 0) + 1);
+  });
+
+  const normalizedFaculty = faculty.map(f => ({
+    ...f,
+    dutyCount: countsByFacultyId.get(f.id) || 0
+  }));
+
+  localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(effectiveHistory));
+  localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(normalizedFaculty));
 };

@@ -1023,17 +1023,22 @@ export default function DutyRoster() {
   const MIN_DUTIES_FOR_FAIRNESS = 20;
   const isFairnessReliable = allHistory.length >= MIN_DUTIES_FOR_FAIRNESS;
 
-  const weekdayDutyMap = (() => {
-    const map = new Map<string, number>([
-      ['Mon', 0], ['Tue', 0], ['Wed', 0], ['Thu', 0], ['Fri', 0], ['Sat', 0], ['Sun', 0]
-    ]);
+  const dateDutySeries = (() => {
+    const map = new Map<string, number>();
     allHistory.forEach(item => {
-      const day = formatISODateLocal(item.date, 'en-US', { weekday: 'short' });
-      map.set(day, (map.get(day) || 0) + 1);
+      map.set(item.date, (map.get(item.date) || 0) + 1);
     });
-    return map;
+    return Array.from(map.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, count]) => ({
+        date,
+        count,
+        label: formatISODateLocal(date, 'en-GB', { day: '2-digit', month: 'short' })
+      }));
   })();
-  const maxWeekdayCount = Math.max(...Array.from(weekdayDutyMap.values()), 1);
+  const trendWindow = 14;
+  const dateDutyTrend = dateDutySeries.slice(-trendWindow);
+  const maxDateDutyCount = Math.max(...dateDutyTrend.map(item => item.count), 1);
 
   const openSavedDate = (date: string) => {
     // Always force-load the selected date, even if it's already selected.
@@ -2655,20 +2660,27 @@ export default function DutyRoster() {
               </div>
 
               <div className="theme-card rounded-xl p-6">
-                <h2 className="text-lg font-bold text-slate-900 mb-4">Weekday Load</h2>
+                <h2 className="text-lg font-bold text-slate-900 mb-1">Date vs Duty Entries</h2>
+                <p className="text-xs text-slate-500 mb-4">Latest {trendWindow} exam dates by assignment volume</p>
                 <div className="space-y-2">
-                  {Array.from(weekdayDutyMap.entries()).map(([day, count]) => {
-                    const width = Math.round((count / maxWeekdayCount) * 100);
-                    return (
-                      <div key={day} className="grid grid-cols-[42px_1fr_36px] items-center gap-2">
-                        <span className="text-xs text-slate-600">{day}</span>
-                        <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
-                          <div className="h-full bg-violet-500" style={{ width: `${width}%` }} />
+                  {dateDutyTrend.length === 0 ? (
+                    <div className="text-sm text-slate-600">No duty data yet.</div>
+                  ) : (
+                    dateDutyTrend.map(item => {
+                      const width = item.count === 0
+                        ? 0
+                        : Math.max(8, Math.round((item.count / maxDateDutyCount) * 100));
+                      return (
+                        <div key={item.date} className="grid grid-cols-[60px_1fr_36px] items-center gap-2">
+                          <span className="text-xs text-slate-600">{item.label}</span>
+                          <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                            <div className="h-full bg-cyan-500" style={{ width: `${width}%` }} />
+                          </div>
+                          <span className="text-xs text-slate-600 text-right">{item.count}</span>
                         </div>
-                        <span className="text-xs text-slate-600 text-right">{count}</span>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
 
@@ -4257,5 +4269,4 @@ function ShiftCard({
     </div>
   );
 }
-
 
