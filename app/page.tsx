@@ -14,11 +14,47 @@ type BlobSyncStatus = {
   message: string;
   at?: string;
 };
+type CommitteeKey = 'university' | 'college';
+type ExamCommitteesState = {
+  university: { convenor: string; members: string[] };
+  college: { convenor: string; members: string[] };
+  ntsNote: string;
+};
 type BackupMeta = Partial<Record<BackupSection, string>>;
 const DRAFT_KEY_PREFIX = 'vic_duty_draft_';
 const BLOB_BACKUP_API = '/api/blob-backup';
 type BackupSection = 'duties' | 'history' | 'faculty';
 const BACKUP_META_KEY = 'vic_blob_backup_meta';
+const EXAM_COMMITTEES_KEY = 'vic_exam_committees';
+const NTS_STAFF_OPTIONS = [
+  { name: 'Sri. Amit Basak', designation: 'Clerk' },
+  { name: 'Smt. Sayani Barua', designation: 'Clerk' },
+  { name: 'Sri. Asit Mondal', designation: 'Bearer' },
+  { name: 'Sri Shyamal Kumar Rai', designation: 'Guard' },
+  { name: 'Sri Iqbal Khan', designation: 'Guard' },
+  { name: 'Sri Naresh Das', designation: 'Laboratory Attendant' },
+  { name: 'Sri Sanjoy Seal', designation: 'Laboratory Attendant' },
+  { name: 'Sri Dipak Das', designation: 'Peon / Bearer' },
+  { name: 'Sri Arup Home Roy', designation: 'Clerk' },
+  { name: 'Smt Chhanda Das', designation: 'Peon / Bearer' },
+  { name: 'Sri Shib Shankar Oraon', designation: 'Guard' },
+  { name: 'Sri Surajit Mandal', designation: 'Guard' },
+  { name: 'Sri Keshab Das', designation: 'Sweeper' },
+  { name: 'Smt Subarna Baidya (Saha)', designation: 'Laboratory Attendant' },
+  { name: 'Sri Hrishikesh Chowdhuri', designation: 'Laboratory Attendant' },
+  { name: 'Sri Sibam Pal', designation: 'Laboratory Attendant' },
+  { name: 'Sri Nishikanta Mondal', designation: 'Laboratory Attendant' },
+  { name: 'Sri Tapan Podder', designation: 'Laboratory Attendant' },
+  { name: 'Sri Sudha Sindhu Mondal', designation: 'Library Clerk' },
+  { name: 'Sri Partha Giri', designation: 'Library Bearer' },
+  { name: 'Sri Mahadeb Pandit', designation: 'Laboratory Attendant' },
+  { name: 'Smt. Mina Sur', designation: 'Library Attendant' },
+  { name: 'Smt Jhuma Banerjee', designation: 'NCC Clerk' },
+  { name: "Smt. Shreya Sengupta", designation: "Typist at Teacher in Charge's Office" },
+  { name: 'Saiful Islam', designation: 'Clerk' },
+  { name: 'Smt Sohita Roy', designation: 'Library Clerk' },
+  { name: 'Sri Subhendra Kr Pandit', designation: 'Library Assistant' }
+] as const;
 const WEEKDAY_OPTIONS = [
   { label: 'Monday', value: 'monday', short: 'Mon' },
   { label: 'Tuesday', value: 'tuesday', short: 'Tue' },
@@ -118,6 +154,188 @@ const normalizeFacultyShift = (value: unknown): '' | 'Morning' | 'Day' => {
   if (raw === 'morning' || raw === 'forenoon' || raw === 'am') return 'Morning';
   if (raw === 'day' || raw === 'afternoon' || raw === 'pm') return 'Day';
   return '';
+};
+
+const normalizeNameKey = (value: string): string =>
+  value.trim().toLowerCase().replace(/\s+/g, ' ');
+
+const buildNameBigrams = (value: string): Set<string> => {
+  const text = normalizeNameKey(value).replace(/\s+/g, '');
+  const out = new Set<string>();
+  for (let i = 0; i < text.length - 1; i += 1) {
+    out.add(text.slice(i, i + 2));
+  }
+  return out;
+};
+
+const getNameSimilarity = (a: string, b: string): number => {
+  const left = normalizeNameKey(a);
+  const right = normalizeNameKey(b);
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+  if (left.startsWith(right) || right.startsWith(left)) return 0.9;
+
+  const leftBigrams = buildNameBigrams(left);
+  const rightBigrams = buildNameBigrams(right);
+  if (!leftBigrams.size || !rightBigrams.size) return 0;
+
+  let overlap = 0;
+  leftBigrams.forEach(bg => {
+    if (rightBigrams.has(bg)) overlap += 1;
+  });
+  return (2 * overlap) / (leftBigrams.size + rightBigrams.size);
+};
+
+const suggestClosestFacultyName = (name: string, options: string[]): string => {
+  if (!options.length) return '';
+  let bestName = '';
+  let bestScore = 0;
+  options.forEach(option => {
+    const score = getNameSimilarity(name, option);
+    if (score > bestScore) {
+      bestScore = score;
+      bestName = option;
+    }
+  });
+  return bestScore >= 0.42 ? bestName : '';
+};
+
+const collectUnmatchedDutyNames = (duties: DutyAssignment[], facultyNames: string[]): string[] => {
+  const nameLookup = new Map(facultyNames.map(name => [normalizeNameKey(name), name]));
+  const unknown = new Set<string>();
+  const collectName = (rawValue?: string | null) => {
+    const value = (rawValue || '').trim();
+    if (!value) return;
+    if (nameLookup.has(normalizeNameKey(value))) return;
+    unknown.add(value);
+  };
+
+  duties.forEach(assignment => {
+    if (assignment.shiftMode !== 'afternoon' && assignment.shift1) {
+      collectName(assignment.shift1.supervisor);
+      assignment.shift1.rooms.forEach(room => room.slots.forEach(slot => collectName(slot.facultyName)));
+    }
+    if (assignment.shiftMode !== 'forenoon' && assignment.shift2) {
+      collectName(assignment.shift2.supervisor);
+      assignment.shift2.rooms.forEach(room => room.slots.forEach(slot => collectName(slot.facultyName)));
+    }
+  });
+  return Array.from(unknown);
+};
+
+type DutyNameOccurrence = {
+  date: string;
+  shift: 1 | 2;
+  role: 'supervisor' | 'invigilator';
+  roomNo?: string;
+};
+
+const collectDutyNameOccurrences = (
+  duties: DutyAssignment[],
+  unmatchedNames: string[]
+): Record<string, DutyNameOccurrence[]> => {
+  const unmatchedByKey = new Map<string, string>();
+  unmatchedNames.forEach(name => unmatchedByKey.set(normalizeNameKey(name), name));
+  const result: Record<string, DutyNameOccurrence[]> = {};
+
+  const pushOccurrence = (
+    rawName: string | null | undefined,
+    occurrence: DutyNameOccurrence
+  ) => {
+    const key = normalizeNameKey(rawName || '');
+    const canonical = unmatchedByKey.get(key);
+    if (!canonical) return;
+    if (!result[canonical]) result[canonical] = [];
+    result[canonical].push(occurrence);
+  };
+
+  duties.forEach(assignment => {
+    if (assignment.shiftMode !== 'afternoon' && assignment.shift1) {
+      pushOccurrence(assignment.shift1.supervisor, {
+        date: assignment.date,
+        shift: 1,
+        role: 'supervisor'
+      });
+      assignment.shift1.rooms.forEach(room => {
+        room.slots.forEach(slot => {
+          pushOccurrence(slot.facultyName, {
+            date: assignment.date,
+            shift: 1,
+            role: 'invigilator',
+            roomNo: room.roomNo || undefined
+          });
+        });
+      });
+    }
+    if (assignment.shiftMode !== 'forenoon' && assignment.shift2) {
+      pushOccurrence(assignment.shift2.supervisor, {
+        date: assignment.date,
+        shift: 2,
+        role: 'supervisor'
+      });
+      assignment.shift2.rooms.forEach(room => {
+        room.slots.forEach(slot => {
+          pushOccurrence(slot.facultyName, {
+            date: assignment.date,
+            shift: 2,
+            role: 'invigilator',
+            roomNo: room.roomNo || undefined
+          });
+        });
+      });
+    }
+  });
+
+  return result;
+};
+
+const applyDutyNameMappings = (
+  duties: DutyAssignment[],
+  facultyNames: string[],
+  mapping: Record<string, string>
+): DutyAssignment[] => {
+  const lookupByNormalized = new Map(facultyNames.map(name => [normalizeNameKey(name), name]));
+  const mappingByNormalized = new Map(
+    Object.entries(mapping)
+      .filter(([, to]) => Boolean((to || '').trim()))
+      .map(([from, to]) => [normalizeNameKey(from), (to || '').trim()])
+  );
+  const resolveName = (value?: string | null): string | null => {
+    const raw = (value || '').trim();
+    if (!raw) return null;
+    const normalized = normalizeNameKey(raw);
+    return mappingByNormalized.get(normalized) || lookupByNormalized.get(normalized) || raw;
+  };
+
+  return duties.map(assignment => ({
+    ...assignment,
+    shift1: assignment.shift1
+      ? {
+          ...assignment.shift1,
+          supervisor: resolveName(assignment.shift1.supervisor) || '',
+          rooms: assignment.shift1.rooms.map(room => ({
+            ...room,
+            slots: room.slots.map(slot => ({
+              ...slot,
+              facultyName: resolveName(slot.facultyName)
+            }))
+          }))
+        }
+      : assignment.shift1,
+    shift2: assignment.shift2
+      ? {
+          ...assignment.shift2,
+          supervisor: resolveName(assignment.shift2.supervisor) || '',
+          rooms: assignment.shift2.rooms.map(room => ({
+            ...room,
+            slots: room.slots.map(slot => ({
+              ...slot,
+              facultyName: resolveName(slot.facultyName)
+            }))
+          }))
+        }
+      : assignment.shift2
+  }));
 };
 
 const getFacultyShiftLabel = (faculty?: Faculty | null): '' | 'Morning' | 'Day' =>
@@ -315,13 +533,13 @@ const ABOUT_SECTIONS = {
     features: [
       {
         name: 'Key Metrics Cards',
-        description: 'Four summary cards show: (1) Saved Duty Dates (count of rosters), (2) Total Duty Entries (count of individual assignments), (3) Faculty Assigned (unique faculty who have at least one duty), (4) Duty Fairness Score (0-100%, higher is more equitable distribution).',
-        usage: 'View at a glance when you open Dashboard. Click through to details if needed. Fairness Score requires minimum 10 duty entries to calculate reliably.'
+        description: 'Four summary cards show: (1) Saved Duty Dates (count of rosters), (2) Total Duty Entries (count of filled duties, including supervisors and invigilators), (3) Faculty Assigned (unique faculty who have at least one saved duty), (4) Duty Fairness Score (0-100%, higher is more equitable distribution).',
+        usage: 'View at a glance when you open Dashboard. Click through to details if needed. Fairness Score requires minimum 20 duty entries to calculate reliably.'
       },
       {
         name: 'Saved Dates List',
         description: 'See all saved duty rosters chronologically with completion status, shift info, and quick actions.',
-        usage: 'Each card shows: Date, Shift Mode, Filled/Total slot count, Progress bar. Click card to load that roster in Duty Roster view. Use Share button to open preview for that date. Use Delete button to remove a saved roster (prompts confirmation).'
+        usage: 'Each card shows: Date, Shift Mode, Filled/Total duty count, Progress bar. Filled Duties includes both supervisors and invigilators. Click card to load that roster in Duty Roster view. Use Share button to open preview for that date. Use Delete button to remove a saved roster (prompts confirmation).'
       },
       {
         name: 'Duty Count Preview',
@@ -329,9 +547,9 @@ const ABOUT_SECTIONS = {
         usage: 'Scroll through list to see full distribution. Longer bars = more duties. Use this to identify overloaded faculty or those who need more assignments. Click a name (if implemented) to see duty history for that person.'
       },
       {
-        name: 'Weekday Load Distribution',
-        description: 'Shows how many examinations fall on each day of the week across all saved rosters.',
-        usage: 'Bar chart with days (Mon-Sun) and counts. Identifies if exams are clustered on certain days. Useful for resource planning and understanding scheduling patterns.'
+        name: 'Date vs Duty Entries',
+        description: 'Shows duty volume by exam date for recent saved rosters.',
+        usage: 'Timeline bar chart by date and filled duty count. Use it to spot high-load dates and compare assignment intensity across the exam period.'
       },
       {
         name: 'Highest Duty Holders',
@@ -346,7 +564,7 @@ const ABOUT_SECTIONS = {
       {
         name: 'Backup and Restore',
         description: 'Full system backup includes duties, history, and faculty data in a single JSON file.',
-        usage: 'Download Backup: Click "Download Backup" → JSON file downloads with timestamp. Restore Backup: Click file input → Select backup JSON → Confirm replacement → System imports data and refreshes. Always backup before major changes.'
+        usage: 'Download Backup: Click "Download Backup" → JSON file downloads with timestamp. Restore Backup: Click file input → Select backup JSON → Confirm replacement. If duty names do not match faculty names (e.g., OCR issues), the app opens a mapping step so unmatched names can be resolved by date, shift, role, and room before final restore.'
       },
       {
         name: 'Cloud Sync Status (Vercel Blob)',
@@ -360,14 +578,14 @@ const ABOUT_SECTIONS = {
       'Use "Share" button from saved dates to quickly generate and distribute rosters without opening Duty Roster view',
       'Take a backup before running any reset operation or importing data — this is your safety net',
       'If Duty Count Preview shows imbalance, prioritize lower-count faculty when creating new rosters',
-      'Weekday Load helps you understand scheduling patterns — if all exams are on Monday, consider faculty availability and workload',
+      'Use Date vs Duty Entries to identify high-load dates and proactively rebalance upcoming rosters',
     ]
   },
   
   advancedFeatures: [
     {
       name: 'Theme Customization',
-      description: 'Choose from four visual themes: Light (default white), Dark (dark mode), Solar (warm amber tones), Cool (blue-gray tones).',
+      description: 'Choose from seven visual themes: Light, Dark, Nord, Forest, Solar, Cool, and Latte.',
       usage: 'Theme dropdown in top-right corner of any view → Select theme → Applies instantly across entire app → Preference is saved in browser'
     },
     {
@@ -445,7 +663,7 @@ const ABOUT_SECTIONS = {
     },
     {
       problem: 'Fairness Score shows "--"',
-      solution: 'Fairness Score requires at least 10 total duty entries to calculate. Create more rosters until you reach this threshold. The score becomes reliable once you have enough data points for statistical analysis.'
+      solution: 'Fairness Score requires at least 20 total duty entries to calculate. Create more rosters until you reach this threshold. The score becomes reliable once you have enough data points for statistical analysis.'
     },
     {
       problem: 'Lost data after browser crash',
@@ -456,6 +674,41 @@ const ABOUT_SECTIONS = {
       solution: 'By default, the system prevents repeat assignments for fairness. If you intentionally need to assign someone multiple times (e.g., emergency coverage), toggle "Allow Repeat Duty" checkbox in Duty Roster view.'
     },
   ],
+
+  examCommittees: {
+    university: {
+      convenor: 'Sri. Arijit Baidya',
+      members: [
+        'Dr. Suchismita Khanra',
+        'Md. Jiaul Anam Molla',
+        'Smt. Madhulina Das',
+        'Smt. Dipanjana Sinha',
+        'Dr. Indrani Mukherjee',
+        'Sri. Basudev Siddhya',
+        'Sri Pramod Lama',
+        'Sri Krishna Sarkar',
+        'Dr. Basari Halder',
+        'Sri Saroj Das',
+        'Sri Nandan Saha',
+        'Sri Asish Moktan',
+        'Dr. Rajkumar Bhattacharya',
+        'Sri Amit Basak (NTS)'
+      ]
+    },
+    college: {
+      convenor: 'Dr. Mousumi Dasgupta and Aditya Sarkar (Joint convenor)',
+      members: [
+        'Dr. Arpita Mukherjee',
+        'Dr. Paramita Ray Biswas',
+        'Dr. Rajendra Yonzone',
+        'Dr. Anuva Samanta',
+        'Dr. Devleena Majumder',
+        'Dr. Mainul Hossain',
+        'Md. Saiful Islam (NTS)'
+      ]
+    },
+    ntsNote: 'NTS stands for Non Teaching Staff.'
+  },
   
   technicalDetails: {
     storage: 'All data is stored in browser local storage (IndexedDB or localStorage depending on browser). Optional cloud sync to Vercel Blob if configured by administrator.',
@@ -491,6 +744,18 @@ const getLocalBackupMeta = (): BackupMeta => {
     return {};
   }
 };
+
+const getDefaultExamCommittees = (): ExamCommitteesState => ({
+  university: {
+    convenor: ABOUT_SECTIONS.examCommittees.university.convenor,
+    members: [...ABOUT_SECTIONS.examCommittees.university.members]
+  },
+  college: {
+    convenor: ABOUT_SECTIONS.examCommittees.college.convenor,
+    members: [...ABOUT_SECTIONS.examCommittees.college.members]
+  },
+  ntsNote: ABOUT_SECTIONS.examCommittees.ntsNote
+});
 
 const setLocalBackupMeta = (meta: BackupMeta) => {
   if (typeof window === 'undefined') return;
@@ -566,6 +831,63 @@ export default function DutyRoster() {
   } | null>(null);
   const [isImportingBackup, setIsImportingBackup] = useState(false);
   const [isImportingFaculty, setIsImportingFaculty] = useState(false);
+  const [pendingBackupImportData, setPendingBackupImportData] = useState<any | null>(null);
+  const [backupNameCandidates, setBackupNameCandidates] = useState<string[]>([]);
+  const [unmatchedBackupNames, setUnmatchedBackupNames] = useState<string[]>([]);
+  const [backupNameMappings, setBackupNameMappings] = useState<Record<string, string>>({});
+  const [examCommittees, setExamCommittees] = useState<ExamCommitteesState>(() => {
+    if (typeof window === 'undefined') return getDefaultExamCommittees();
+    try {
+      const raw = localStorage.getItem(EXAM_COMMITTEES_KEY);
+      if (!raw) return getDefaultExamCommittees();
+      const parsed = JSON.parse(raw) as Partial<ExamCommitteesState>;
+      return {
+        university: {
+          convenor: parsed?.university?.convenor || ABOUT_SECTIONS.examCommittees.university.convenor,
+          members: Array.isArray(parsed?.university?.members)
+            ? parsed!.university!.members
+            : [...ABOUT_SECTIONS.examCommittees.university.members]
+        },
+        college: {
+          convenor: parsed?.college?.convenor || ABOUT_SECTIONS.examCommittees.college.convenor,
+          members: Array.isArray(parsed?.college?.members)
+            ? parsed!.college!.members
+            : [...ABOUT_SECTIONS.examCommittees.college.members]
+        },
+        ntsNote: parsed?.ntsNote || ABOUT_SECTIONS.examCommittees.ntsNote
+      };
+    } catch {
+      return getDefaultExamCommittees();
+    }
+  });
+  const [committeeAddSelection, setCommitteeAddSelection] = useState<Record<CommitteeKey, string>>({
+    university: '',
+    college: ''
+  });
+  const [committeeAddOpen, setCommitteeAddOpen] = useState<Record<CommitteeKey, boolean>>({
+    university: false,
+    college: false
+  });
+  const [committeeEditMode, setCommitteeEditMode] = useState<Record<CommitteeKey, boolean>>({
+    university: false,
+    college: false
+  });
+  const [committeeAddSearch, setCommitteeAddSearch] = useState<Record<CommitteeKey, string>>({
+    university: '',
+    college: ''
+  });
+  const [draggedCommitteeMember, setDraggedCommitteeMember] = useState<{
+    committee: CommitteeKey;
+    index: number;
+  } | null>(null);
+  const [aboutSectionsOpen, setAboutSectionsOpen] = useState({
+    moduleOverview: false,
+    bestPractices: false,
+    troubleshooting: false,
+    technical: false,
+    glossary: false,
+    advanced: false
+  });
   const unavailableDateInputRef = useRef<HTMLInputElement | null>(null);
   const newUnavailableDateInputRef = useRef<HTMLInputElement | null>(null);
   const allFaculty = useMemo(() => getAllFaculty(), [dataVersion]);
@@ -758,6 +1080,11 @@ export default function DutyRoster() {
       localStorage.setItem('vic_theme', theme);
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(EXAM_COMMITTEES_KEY, JSON.stringify(examCommittees));
+  }, [examCommittees]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -996,14 +1323,123 @@ export default function DutyRoster() {
   const summary1 = summarizeShift(rooms1, super1);
   const summary2 = summarizeShift(rooms2, super2);
 
+  const committeeFacultyOptions = useMemo(
+    () => [...new Set(allFaculty.map(f => f.name))].sort((a, b) => a.localeCompare(b)),
+    [allFaculty]
+  );
+  const committeeAddOptionsByCommittee = useMemo(() => {
+    const buildOptions = (committee: CommitteeKey) => {
+      const existing = new Set(examCommittees[committee].members.map(name => name.toLowerCase()));
+      const teaching = committeeFacultyOptions
+        .filter(name => !existing.has(name.toLowerCase()))
+        .map(name => ({
+          value: `faculty::${name}`,
+          label: `${name} (Teaching)`
+        }));
+      const nts = NTS_STAFF_OPTIONS
+        .map(person => ({
+          nameWithTag: `${person.name} (NTS)`,
+          label: `${person.name} - ${person.designation} (Non-Teaching)`
+        }))
+        .filter(item => !existing.has(item.nameWithTag.toLowerCase()))
+        .map(item => ({
+          value: `nts::${item.nameWithTag}`,
+          label: item.label
+        }));
+      return [...teaching, ...nts];
+    };
+    return {
+      university: buildOptions('university'),
+      college: buildOptions('college')
+    };
+  }, [committeeFacultyOptions, examCommittees]);
+
+  const addCommitteeMember = (committee: CommitteeKey) => {
+    const selected = (committeeAddSelection[committee] || '').trim();
+    if (!selected) return;
+    const [type, raw] = selected.split('::');
+    const selectedName = (raw || '').trim();
+    if (!selectedName) return;
+    const normalized = type === 'nts'
+      ? (selectedName.endsWith('(NTS)') ? selectedName : `${selectedName} (NTS)`)
+      : selectedName;
+    setExamCommittees(prev => {
+      const members = prev[committee].members;
+      if (members.some(name => name.toLowerCase() === normalized.toLowerCase())) return prev;
+      return {
+        ...prev,
+        [committee]: {
+          ...prev[committee],
+          members: [...members, normalized]
+        }
+      };
+    });
+    setCommitteeAddSelection(prev => ({ ...prev, [committee]: '' }));
+    setCommitteeAddOpen(prev => ({ ...prev, [committee]: false }));
+    setToolNotice({ tone: 'success', message: `Added ${normalized} to ${committee} exam committee.` });
+  };
+
+  const removeCommitteeMember = (committee: CommitteeKey, memberName: string) => {
+    setExamCommittees(prev => ({
+      ...prev,
+      [committee]: {
+        ...prev[committee],
+        members: prev[committee].members.filter(name => name !== memberName)
+      }
+    }));
+    setToolNotice({ tone: 'info', message: `Removed ${memberName} from ${committee} exam committee.` });
+  };
+  const updateCommitteeConvenor = (committee: CommitteeKey, convenor: string) => {
+    setExamCommittees(prev => ({
+      ...prev,
+      [committee]: {
+        ...prev[committee],
+        convenor
+      }
+    }));
+  };
+  const onCommitteeMemberDragStart = (committee: CommitteeKey, index: number) => {
+    setDraggedCommitteeMember({ committee, index });
+  };
+  const onCommitteeMemberDrop = (committee: CommitteeKey, targetIndex: number) => {
+    if (!draggedCommitteeMember) return;
+    if (draggedCommitteeMember.committee !== committee) {
+      setDraggedCommitteeMember(null);
+      return;
+    }
+    const sourceIndex = draggedCommitteeMember.index;
+    if (sourceIndex === targetIndex) {
+      setDraggedCommitteeMember(null);
+      return;
+    }
+    setExamCommittees(prev => {
+      const members = [...prev[committee].members];
+      const [item] = members.splice(sourceIndex, 1);
+      members.splice(targetIndex, 0, item);
+      return {
+        ...prev,
+        [committee]: {
+          ...prev[committee],
+          members
+        }
+      };
+    });
+    setDraggedCommitteeMember(null);
+  };
+
+
   const allAssignments = useMemo(() => getAllDutyAssignments(), [dataVersion]);
   const allHistory = useMemo(() => getAllDutyHistory(), [dataVersion]);
 
   const countAssignmentSlots = (assignment: DutyAssignment) => {
     const countShift = (shift?: ShiftData) => {
       if (!shift) return { total: 0, filled: 0 };
-      const total = shift.rooms.reduce((sum, r) => sum + r.slots.length, 0);
-      const filled = shift.rooms.reduce((sum, r) => sum + r.slots.filter(s => s.facultyName).length, 0);
+      const invigilatorTotal = shift.rooms.reduce((sum, r) => sum + r.slots.length, 0);
+      const invigilatorFilled = shift.rooms.reduce((sum, r) => sum + r.slots.filter(s => s.facultyName).length, 0);
+      const supervisorTotal = 1;
+      const supervisorFilled = shift.supervisor && shift.supervisor.trim() ? 1 : 0;
+      const total = invigilatorTotal + supervisorTotal;
+      const filled = invigilatorFilled + supervisorFilled;
       return { total, filled };
     };
 
@@ -1013,7 +1449,31 @@ export default function DutyRoster() {
   };
 
   const savedAssignments = [...allAssignments].sort((a, b) => b.date.localeCompare(a.date));
-  const assignedFacultyIds = new Set(allHistory.map(h => h.facultyId));
+  const totalFilledDuties = savedAssignments.reduce((sum, assignment) => {
+    return sum + countAssignmentSlots(assignment).filled;
+  }, 0);
+  const assignedFacultyNames = (() => {
+    const names = new Set<string>();
+    const addName = (value?: string | null) => {
+      const name = (value || '').trim();
+      if (name) names.add(name);
+    };
+    savedAssignments.forEach(assignment => {
+      if (assignment.shiftMode !== 'afternoon' && assignment.shift1) {
+        addName(assignment.shift1.supervisor);
+        assignment.shift1.rooms.forEach(room => {
+          room.slots.forEach(slot => addName(slot.facultyName));
+        });
+      }
+      if (assignment.shiftMode !== 'forenoon' && assignment.shift2) {
+        addName(assignment.shift2.supervisor);
+        assignment.shift2.rooms.forEach(room => {
+          room.slots.forEach(slot => addName(slot.facultyName));
+        });
+      }
+    });
+    return names;
+  })();
   const facultyByLoad = [...allFaculty].sort((a, b) => (b.dutyCount || 0) - (a.dutyCount || 0));
   const maxDutyCount = facultyByLoad[0]?.dutyCount || 1;
   const dutyCounts = allFaculty.map(f => f.dutyCount || 0);
@@ -1027,7 +1487,7 @@ export default function DutyRoster() {
   const cvRatio = meanDuty === 0 ? 0 : (stdDuty / meanDuty);
   const dutyFairnessScore = Math.max(0, Math.min(100, Math.round(100 / (1 + cvRatio))));
   const MIN_DUTIES_FOR_FAIRNESS = 20;
-  const isFairnessReliable = allHistory.length >= MIN_DUTIES_FOR_FAIRNESS;
+  const isFairnessReliable = totalFilledDuties >= MIN_DUTIES_FOR_FAIRNESS;
   const cloudStatusTone =
     blobSyncStatus.state === 'synced'
       ? 'success'
@@ -1057,22 +1517,23 @@ export default function DutyRoster() {
             ? 'Cloud Sync Disabled'
             : 'Cloud Sync';
 
-  const dateDutySeries = (() => {
-    const map = new Map<string, number>();
-    allHistory.forEach(item => {
-      map.set(item.date, (map.get(item.date) || 0) + 1);
-    });
-    return Array.from(map.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([date, count]) => ({
-        date,
-        count,
-        label: formatISODateLocal(date, 'en-GB', { day: '2-digit', month: 'short' })
-      }));
-  })();
+  const dateDutySeries = [...savedAssignments]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(assignment => ({
+      date: assignment.date,
+      count: countAssignmentSlots(assignment).filled,
+      label: formatISODateLocal(assignment.date, 'en-GB', { day: '2-digit', month: 'short' })
+    }));
   const trendWindow = 14;
   const dateDutyTrend = dateDutySeries.slice(-trendWindow);
   const maxDateDutyCount = Math.max(...dateDutyTrend.map(item => item.count), 1);
+  const backupNameOccurrenceMap = useMemo(() => {
+    if (!pendingBackupImportData || unmatchedBackupNames.length === 0) return {};
+    const duties = Array.isArray(pendingBackupImportData.duties)
+      ? pendingBackupImportData.duties as DutyAssignment[]
+      : [];
+    return collectDutyNameOccurrences(duties, unmatchedBackupNames);
+  }, [pendingBackupImportData, unmatchedBackupNames]);
 
   const openSavedDate = (date: string) => {
     // Always force-load the selected date, even if it's already selected.
@@ -2214,6 +2675,56 @@ export default function DutyRoster() {
     URL.revokeObjectURL(url);
   };
 
+  const resetBackupNameResolver = () => {
+    setPendingBackupImportData(null);
+    setBackupNameCandidates([]);
+    setUnmatchedBackupNames([]);
+    setBackupNameMappings({});
+  };
+
+  const finalizeBackupRestore = (rawData: any, resolvedNamesCount = 0) => {
+    importBackupData(rawData);
+    clearAllDrafts();
+    setSelectedFaculty(null);
+    setIsEditingFaculty(false);
+    setDataVersion(v => v + 1);
+    loadDutyAssignment(selectedDate);
+    setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
+    const dutiesCount = Array.isArray(rawData?.duties) ? rawData.duties.length : 0;
+    const facultyCount = Array.isArray(rawData?.faculty) ? rawData.faculty.length : 0;
+    setToolNotice({
+      tone: 'success',
+      message:
+        resolvedNamesCount > 0
+          ? `Backup restored (${dutiesCount} duties, ${facultyCount} faculty). Resolved ${resolvedNamesCount} name mismatches.`
+          : `Backup restored (${dutiesCount} duties, ${facultyCount} faculty).`
+    });
+    void syncBackupToBlob(['duties', 'history', 'faculty']);
+  };
+
+  const applyResolvedBackupNameMappings = () => {
+    if (!pendingBackupImportData) return;
+    const unresolved = unmatchedBackupNames.filter(name => !(backupNameMappings[name] || '').trim());
+    if (unresolved.length > 0) {
+      const message = `Please map all unmatched names before restoring (${unresolved.length} remaining).`;
+      setToolNotice({ tone: 'warning', message });
+      alert(message);
+      return;
+    }
+    setIsImportingBackup(true);
+    try {
+      const duties = Array.isArray(pendingBackupImportData.duties) ? pendingBackupImportData.duties : [];
+      const patched = {
+        ...pendingBackupImportData,
+        duties: applyDutyNameMappings(duties, backupNameCandidates, backupNameMappings)
+      };
+      finalizeBackupRestore(patched, unmatchedBackupNames.length);
+      resetBackupNameResolver();
+    } finally {
+      setIsImportingBackup(false);
+    }
+  };
+
   const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -2251,18 +2762,34 @@ export default function DutyRoster() {
         alert(message);
         return;
       }
-      importBackupData(data);
-      clearAllDrafts();
-      setDataVersion(v => v + 1);
-      loadDutyAssignment(selectedDate);
-      setAvailableFaculty(getAvailableFacultyByDate(selectedDate, getAllFaculty()));
-      const dutiesCount = Array.isArray((data as any).duties) ? (data as any).duties.length : 0;
-      const facultyCount = (data as any).faculty.length;
-      setToolNotice({
-        tone: 'success',
-        message: `Backup restored (${dutiesCount} duties, ${facultyCount} faculty).`
-      });
-      void syncBackupToBlob(['duties', 'history', 'faculty']);
+      const importedFaculty = (data as any).faculty as Faculty[];
+      const facultyNames = Array.from(
+        new Set(
+          importedFaculty
+            .map(f => String(f?.name || '').trim())
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b));
+
+      const importedDuties = Array.isArray((data as any).duties) ? (data as any).duties as DutyAssignment[] : [];
+      const unmatched = collectUnmatchedDutyNames(importedDuties, facultyNames);
+
+      if (unmatched.length > 0 && facultyNames.length > 0) {
+        const initialMapping = Object.fromEntries(
+          unmatched.map(name => [name, suggestClosestFacultyName(name, facultyNames)])
+        ) as Record<string, string>;
+        setPendingBackupImportData(data);
+        setBackupNameCandidates(facultyNames);
+        setUnmatchedBackupNames(unmatched);
+        setBackupNameMappings(initialMapping);
+        setToolNotice({
+          tone: 'warning',
+          message: `Found ${unmatched.length} unmatched duty names. Review and map them before restore.`
+        });
+        return;
+      }
+
+      finalizeBackupRestore(data);
     } catch {
       const message = 'Failed to import backup. Please verify JSON format and structure.';
       setToolNotice({ tone: 'error', message });
@@ -2442,6 +2969,7 @@ export default function DutyRoster() {
             </div>
           </div>
         </div>
+
       </div>
     );
   }
@@ -2519,11 +3047,11 @@ export default function DutyRoster() {
             </div>
             <div className="theme-card rounded-xl p-5">
               <div className="text-sm text-slate-600">Total Duty Entries</div>
-              <div className="text-3xl font-bold text-slate-900 mt-1">{allHistory.length}</div>
+              <div className="text-3xl font-bold text-slate-900 mt-1">{totalFilledDuties}</div>
             </div>
             <div className="theme-card rounded-xl p-5">
               <div className="text-sm text-slate-600">Faculty Assigned</div>
-              <div className="text-3xl font-bold text-slate-900 mt-1">{assignedFacultyIds.size}</div>
+              <div className="text-3xl font-bold text-slate-900 mt-1">{assignedFacultyNames.size}</div>
             </div>
             <div className="theme-card rounded-xl p-5">
               <div className="text-sm text-slate-600">Duty Fairness Score</div>
@@ -2533,7 +3061,7 @@ export default function DutyRoster() {
               <div className="text-xs text-slate-500 mt-1">
                 {isFairnessReliable
                   ? 'Higher means better distribution'
-                  : `Need at least ${MIN_DUTIES_FOR_FAIRNESS} duty entries (now ${allHistory.length})`}
+                  : `Need at least ${MIN_DUTIES_FOR_FAIRNESS} duty entries (now ${totalFilledDuties})`}
               </div>
             </div>
           </div>
@@ -2558,7 +3086,7 @@ export default function DutyRoster() {
                         <div
                           key={item.id}
                           onClick={() => openSavedDate(item.date)}
-                          className="w-full text-left theme-panel rounded-lg p-4 border border-slate-200 hover:border-blue-300 hover:bg-blue-50/40 transition-colors cursor-pointer"
+                          className="saved-date-item w-full text-left theme-panel rounded-lg p-4 border border-slate-200 transition-colors cursor-pointer"
                         >
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                           <div>
@@ -2571,7 +3099,7 @@ export default function DutyRoster() {
                             </div>
                             <div className="flex items-center justify-between sm:justify-start gap-3 w-full sm:w-auto">
                               <div className="text-right">
-                                <div className="text-xs text-slate-500">Filled Slots</div>
+                                <div className="text-xs text-slate-500">Filled Duties</div>
                                 <div className="font-semibold text-slate-900">{slot.filled}/{slot.total}</div>
                               </div>
                               <button
@@ -2859,6 +3387,94 @@ export default function DutyRoster() {
             </div>
           </div>
         </div>
+
+        {pendingBackupImportData && (
+          <div className="fixed inset-0 z-[70] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-3xl theme-card rounded-xl border border-slate-200 p-5 shadow-2xl">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Resolve Name Mismatches</h3>
+                  <p className="text-xs text-slate-600 mt-1">
+                    OCR names in duty assignments do not match faculty records. Map each name before restore.
+                  </p>
+                </div>
+                <button
+                  onClick={resetBackupNameResolver}
+                  className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mt-4 max-h-[52vh] overflow-y-auto pr-1 space-y-3">
+                {unmatchedBackupNames.map((name) => (
+                  <div key={name} className="theme-panel rounded-lg border border-slate-200 p-3 space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr] gap-3 items-center">
+                      <div>
+                        <div className="text-xs text-slate-500">Unmatched duty name</div>
+                        <div className="text-sm font-semibold text-slate-900">{name}</div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-600 mb-1">Map to faculty</label>
+                        <select
+                          value={backupNameMappings[name] || ''}
+                          onChange={(e) => setBackupNameMappings(prev => ({ ...prev, [name]: e.target.value }))}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white/90"
+                        >
+                          <option value="">Select faculty</option>
+                          {backupNameCandidates.map(option => (
+                            <option key={`${name}-${option}`} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-slate-600 mb-2">Found In</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(backupNameOccurrenceMap[name] || []).map((occ, idx) => (
+                          <span
+                            key={`${name}-${occ.date}-${occ.shift}-${occ.role}-${occ.roomNo || 'na'}-${idx}`}
+                            className="text-[11px] px-2 py-1 rounded-md border border-slate-300 bg-slate-100 text-slate-700"
+                          >
+                            {formatISODateLocal(occ.date, 'en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} | S{occ.shift} | {occ.role === 'supervisor' ? 'Supervisor' : `Invigilator${occ.roomNo ? ` (Room ${occ.roomNo})` : ''}`}
+                          </span>
+                        ))}
+                        {(backupNameOccurrenceMap[name] || []).length === 0 && (
+                          <span className="text-[11px] px-2 py-1 rounded-md border border-slate-300 bg-slate-100 text-slate-600">
+                            No location details found
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="text-xs text-slate-500">
+                  {unmatchedBackupNames.filter(name => !(backupNameMappings[name] || '').trim()).length} names remaining
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={resetBackupNameResolver}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-100"
+                  >
+                    Cancel Restore
+                  </button>
+                  <button
+                    onClick={applyResolvedBackupNameMappings}
+                    disabled={isImportingBackup}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Apply Mapping & Restore
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -3591,7 +4207,7 @@ export default function DutyRoster() {
                     <Users size={18} />Faculty Directory
                   </button>
                   <button onClick={() => setViewMode('about')} className="px-4 py-2 rounded-lg bg-blue-100 text-blue-700 font-medium flex items-center gap-2">
-                    <Info size={18} />Documentation
+                    <Info size={18} />About
                   </button>
                 </nav>
               </div>
@@ -3654,67 +4270,87 @@ export default function DutyRoster() {
 
           {/* Module Overview */}
           <section className="theme-card rounded-2xl p-6 border border-blue-200/30">
-            <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-              <LayoutDashboard size={20} className="text-blue-600" />
-              Module Overview
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="theme-panel rounded-xl p-4 border border-slate-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <ClipboardList size={16} className="text-blue-600" />
-                  <h3 className="font-bold text-slate-900 text-sm">Duty Roster</h3>
+            <button
+              onClick={() => setAboutSectionsOpen(prev => ({ ...prev, moduleOverview: !prev.moduleOverview }))}
+              className="w-full text-left flex items-center justify-between"
+            >
+              <span className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <LayoutDashboard size={20} className="text-blue-600" />
+                Module Overview
+              </span>
+              <ChevronDown
+                size={18}
+                className={`text-slate-500 transition-transform ${aboutSectionsOpen.moduleOverview ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {aboutSectionsOpen.moduleOverview && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                <div className="theme-panel rounded-xl p-4 border border-slate-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <ClipboardList size={16} className="text-blue-600" />
+                    <h3 className="font-bold text-slate-900 text-sm">Duty Roster</h3>
+                  </div>
+                  <p className="text-xs text-slate-600 mb-3">{ABOUT_SECTIONS.dutyRosterModule.overview}</p>
+                  <ul className="space-y-1">
+                    {ABOUT_SECTIONS.dutyRosterModule.features.map(f => (
+                      <li key={f.name} className="text-xs text-slate-700 flex gap-1.5">
+                        <span className="text-blue-500 font-bold mt-0.5 flex-shrink-0">›</span>
+                        <span><span className="font-semibold">{f.name}:</span> {f.description}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <p className="text-xs text-slate-600 mb-3">{ABOUT_SECTIONS.dutyRosterModule.overview}</p>
-                <ul className="space-y-1">
-                  {ABOUT_SECTIONS.dutyRosterModule.features.map(f => (
-                    <li key={f.name} className="text-xs text-slate-700 flex gap-1.5">
-                      <span className="text-blue-500 font-bold mt-0.5 flex-shrink-0">›</span>
-                      <span><span className="font-semibold">{f.name}:</span> {f.description}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="theme-panel rounded-xl p-4 border border-slate-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <Users size={16} className="text-emerald-600" />
-                  <h3 className="font-bold text-slate-900 text-sm">Faculty Directory</h3>
+                <div className="theme-panel rounded-xl p-4 border border-slate-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Users size={16} className="text-emerald-600" />
+                    <h3 className="font-bold text-slate-900 text-sm">Faculty Directory</h3>
+                  </div>
+                  <p className="text-xs text-slate-600 mb-3">{ABOUT_SECTIONS.facultyDirectoryModule.overview}</p>
+                  <ul className="space-y-1">
+                    {ABOUT_SECTIONS.facultyDirectoryModule.features.map(f => (
+                      <li key={f.name} className="text-xs text-slate-700 flex gap-1.5">
+                        <span className="text-emerald-500 font-bold mt-0.5 flex-shrink-0">›</span>
+                        <span><span className="font-semibold">{f.name}:</span> {f.description}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <p className="text-xs text-slate-600 mb-3">{ABOUT_SECTIONS.facultyDirectoryModule.overview}</p>
-                <ul className="space-y-1">
-                  {ABOUT_SECTIONS.facultyDirectoryModule.features.map(f => (
-                    <li key={f.name} className="text-xs text-slate-700 flex gap-1.5">
-                      <span className="text-emerald-500 font-bold mt-0.5 flex-shrink-0">›</span>
-                      <span><span className="font-semibold">{f.name}:</span> {f.description}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="theme-panel rounded-xl p-4 border border-slate-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <TrendingUp size={16} className="text-violet-600" />
-                  <h3 className="font-bold text-slate-900 text-sm">Dashboard</h3>
+                <div className="theme-panel rounded-xl p-4 border border-slate-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <TrendingUp size={16} className="text-violet-600" />
+                    <h3 className="font-bold text-slate-900 text-sm">Dashboard</h3>
+                  </div>
+                  <p className="text-xs text-slate-600 mb-3">{ABOUT_SECTIONS.dashboardModule.overview}</p>
+                  <ul className="space-y-1">
+                    {ABOUT_SECTIONS.dashboardModule.features.map(f => (
+                      <li key={f.name} className="text-xs text-slate-700 flex gap-1.5">
+                        <span className="text-violet-500 font-bold mt-0.5 flex-shrink-0">›</span>
+                        <span><span className="font-semibold">{f.name}:</span> {f.description}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <p className="text-xs text-slate-600 mb-3">{ABOUT_SECTIONS.dashboardModule.overview}</p>
-                <ul className="space-y-1">
-                  {ABOUT_SECTIONS.dashboardModule.features.map(f => (
-                    <li key={f.name} className="text-xs text-slate-700 flex gap-1.5">
-                      <span className="text-violet-500 font-bold mt-0.5 flex-shrink-0">›</span>
-                      <span><span className="font-semibold">{f.name}:</span> {f.description}</span>
-                    </li>
-                  ))}
-                </ul>
               </div>
-            </div>
+            )}
           </section>
 
-          {/* Best Practices & Troubleshooting */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <section className="theme-card rounded-2xl p-6 border border-amber-300/40">
-              <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+          {/* Best Practices */}
+          <section className="theme-card rounded-2xl p-6 border border-amber-300/40">
+            <button
+              onClick={() => setAboutSectionsOpen(prev => ({ ...prev, bestPractices: !prev.bestPractices }))}
+              className="w-full text-left flex items-center justify-between"
+            >
+              <span className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <TrendingUp size={20} className="text-amber-600" />
                 Best Practices
-              </h2>
-              <ul className="space-y-2">
+              </span>
+              <ChevronDown
+                size={18}
+                className={`text-slate-500 transition-transform ${aboutSectionsOpen.bestPractices ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {aboutSectionsOpen.bestPractices && (
+              <ul className="space-y-2 mt-4">
                 {ABOUT_SECTIONS.bestPractices.map((practice, idx) => (
                   <li key={idx} className="flex gap-2 text-xs text-slate-700 leading-relaxed">
                     <span className="text-amber-600 font-bold flex-shrink-0">{idx + 1}.</span>
@@ -3722,62 +4358,384 @@ export default function DutyRoster() {
                   </li>
                 ))}
               </ul>
-            </section>
+            )}
+          </section>
 
-            <section className="theme-card rounded-2xl p-6 border border-red-200/40">
-              <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-                <AlertCircle size={20} className="text-red-600" />
-                Troubleshooting
-              </h2>
-              <div className="space-y-3">
-                {ABOUT_SECTIONS.troubleshooting.map((item, idx) => (
-                  <div key={idx} className="theme-panel rounded-lg p-3 border border-red-200/40">
-                    <p className="text-xs font-semibold text-slate-800 mb-1">{item.problem}</p>
-                    <p className="text-xs text-slate-600 leading-relaxed">{item.solution}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          {/* Glossary & Technical */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <section className="theme-card glossary-section rounded-2xl p-6 border">
-              <h2 className="text-lg font-bold text-slate-900 mb-4">Glossary</h2>
-              <div className="space-y-2">
-                {ABOUT_SECTIONS.glossary.map((item) => (
-                  <div key={item.term} className="theme-panel glossary-item rounded-lg p-3 border">
-                    <span className="glossary-term font-bold text-xs">{item.term}: </span>
-                    <span className="text-xs text-slate-700">{item.definition}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <div className="space-y-6">
-              <section className="theme-card rounded-2xl p-6 border border-slate-200">
-                <h2 className="text-lg font-bold text-slate-900 mb-4">Technical Details</h2>
-                <div className="space-y-3">
-                  <div><p className="text-xs font-semibold text-slate-700 mb-0.5">Data Storage</p><p className="text-xs text-slate-600">{ABOUT_SECTIONS.technicalDetails.storage}</p></div>
-                  <div><p className="text-xs font-semibold text-slate-700 mb-0.5">Browser Compatibility</p><p className="text-xs text-slate-600">{ABOUT_SECTIONS.technicalDetails.compatibility}</p></div>
-                  <div><p className="text-xs font-semibold text-slate-700 mb-0.5">Performance</p><p className="text-xs text-slate-600">{ABOUT_SECTIONS.technicalDetails.performance}</p></div>
-                  <div><p className="text-xs font-semibold text-slate-700 mb-0.5">Security & Privacy</p><p className="text-xs text-slate-600">{ABOUT_SECTIONS.technicalDetails.security}</p></div>
+          <section className="theme-card rounded-2xl p-6 border border-slate-200">
+            <h2 className="text-lg font-bold text-slate-900 mb-4">Exam Committees</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="theme-panel rounded-xl p-4 border border-slate-200">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-bold text-slate-900">University Exam Committee</h3>
+                  {!committeeEditMode.university ? (
+                    <button
+                      onClick={() => setCommitteeEditMode(prev => ({ ...prev, university: true }))}
+                      className="px-2.5 py-1 rounded-md text-xs font-semibold border border-blue-300 text-blue-700 hover:bg-blue-50 transition-colors"
+                    >
+                      Edit
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setCommitteeEditMode(prev => ({ ...prev, university: false }));
+                        setCommitteeAddOpen(prev => ({ ...prev, university: false }));
+                        setCommitteeAddSearch(prev => ({ ...prev, university: '' }));
+                        setCommitteeAddSelection(prev => ({ ...prev, university: '' }));
+                      }}
+                      className="px-2.5 py-1 rounded-md text-xs font-semibold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition-colors"
+                    >
+                      Done
+                    </button>
+                  )}
                 </div>
-              </section>
-
-              <section className="theme-card rounded-2xl p-6 border border-slate-200">
-                <h2 className="text-lg font-bold text-slate-900 mb-4">Advanced Features</h2>
-                <div className="space-y-2">
-                  {ABOUT_SECTIONS.advancedFeatures.map((f) => (
-                    <div key={f.name} className="theme-panel rounded-lg p-3 border border-slate-200">
-                      <p className="text-xs font-semibold text-slate-800 mb-0.5">{f.name}</p>
-                      <p className="text-xs text-slate-600">{f.description}</p>
-                    </div>
+                {committeeEditMode.university ? (
+                  <div className="mb-2">
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">Convenor</label>
+                    <input
+                      type="text"
+                      value={examCommittees.university.convenor}
+                      onChange={(e) => updateCommitteeConvenor('university', e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white/90"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-700 mb-2">
+                    <span className="font-semibold">Convenor:</span> {examCommittees.university.convenor}
+                  </p>
+                )}
+                <p className="text-xs font-semibold text-slate-700 mb-1">Members:</p>
+                <ul className="space-y-1">
+                  {examCommittees.university.members.map((member, index) => (
+                    <li
+                      key={`uni-${member}`}
+                      draggable={committeeEditMode.university}
+                      onDragStart={() => committeeEditMode.university && onCommitteeMemberDragStart('university', index)}
+                      onDragOver={(e) => committeeEditMode.university && e.preventDefault()}
+                      onDrop={() => committeeEditMode.university && onCommitteeMemberDrop('university', index)}
+                      onDragEnd={() => setDraggedCommitteeMember(null)}
+                      className={`text-xs text-slate-600 flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 transition-colors ${
+                        committeeEditMode.university ? 'cursor-move' : ''
+                      } ${
+                        committeeEditMode.university && draggedCommitteeMember?.committee === 'university' && draggedCommitteeMember.index === index
+                          ? 'border-blue-400 bg-blue-100/40'
+                          : 'border-slate-200 hover:border-blue-300'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        {committeeEditMode.university && <GripVertical size={12} className="text-slate-400 flex-shrink-0" />}
+                        <span className="text-blue-500 font-bold mt-0.5 flex-shrink-0">•</span>
+                        <span className="truncate">{member}</span>
+                      </span>
+                      {committeeEditMode.university && (
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            onClick={() => removeCommitteeMember('university', member)}
+                            className="px-2 py-0.5 rounded-md text-[11px] font-semibold border border-red-300 text-red-700 hover:bg-red-50 transition-colors"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </li>
                   ))}
+                </ul>
+                {committeeEditMode.university && (
+                <div className="mt-3 pt-3 border-t border-slate-200">
+                  {!committeeAddOpen.university ? (
+                    <button
+                      onClick={() => setCommitteeAddOpen(prev => ({ ...prev, university: true }))}
+                      className="w-full px-3 py-2 rounded-lg text-xs font-semibold border border-blue-300 text-blue-700 hover:bg-blue-50 transition-colors"
+                    >
+                      + Add Member (Teaching / Non-Teaching)
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        value={committeeAddSearch.university}
+                        onChange={(e) => setCommitteeAddSearch(prev => ({ ...prev, university: e.target.value }))}
+                        placeholder="Search teaching/non-teaching member..."
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white/90"
+                      />
+                      <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-300 theme-panel">
+                        {committeeAddOptionsByCommittee.university
+                          .filter(option => option.label.toLowerCase().includes(committeeAddSearch.university.toLowerCase()))
+                          .map(option => (
+                            <button
+                              key={`u-add-${option.value}`}
+                              type="button"
+                              onClick={() => setCommitteeAddSelection(prev => ({ ...prev, university: option.value }))}
+                              className={`committee-add-option w-full text-left px-3 py-2 text-xs border-b border-slate-200 last:border-b-0 transition-colors ${
+                                committeeAddSelection.university === option.value
+                                  ? 'committee-add-option-selected-blue text-blue-700'
+                                  : 'text-slate-700'
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => addCommitteeMember('university')}
+                          disabled={!committeeAddSelection.university}
+                          className="px-3 py-2 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Add
+                        </button>
+                        <button
+                          onClick={() => {
+                            setCommitteeAddOpen(prev => ({ ...prev, university: false }));
+                            setCommitteeAddSelection(prev => ({ ...prev, university: '' }));
+                            setCommitteeAddSearch(prev => ({ ...prev, university: '' }));
+                          }}
+                          className="px-3 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </section>
+                )}
+              </div>
+
+              <div className="theme-panel rounded-xl p-4 border border-slate-200">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-bold text-slate-900">College Exam Committee</h3>
+                  {!committeeEditMode.college ? (
+                    <button
+                      onClick={() => setCommitteeEditMode(prev => ({ ...prev, college: true }))}
+                      className="px-2.5 py-1 rounded-md text-xs font-semibold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition-colors"
+                    >
+                      Edit
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setCommitteeEditMode(prev => ({ ...prev, college: false }));
+                        setCommitteeAddOpen(prev => ({ ...prev, college: false }));
+                        setCommitteeAddSearch(prev => ({ ...prev, college: '' }));
+                        setCommitteeAddSelection(prev => ({ ...prev, college: '' }));
+                      }}
+                      className="px-2.5 py-1 rounded-md text-xs font-semibold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition-colors"
+                    >
+                      Done
+                    </button>
+                  )}
+                </div>
+                {committeeEditMode.college ? (
+                  <div className="mb-2">
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">Convenor</label>
+                    <input
+                      type="text"
+                      value={examCommittees.college.convenor}
+                      onChange={(e) => updateCommitteeConvenor('college', e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white/90"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-700 mb-2">
+                    <span className="font-semibold">Convenor:</span> {examCommittees.college.convenor}
+                  </p>
+                )}
+                <p className="text-xs font-semibold text-slate-700 mb-1">Members:</p>
+                <ul className="space-y-1">
+                  {examCommittees.college.members.map((member, index) => (
+                    <li
+                      key={`college-${member}`}
+                      draggable={committeeEditMode.college}
+                      onDragStart={() => committeeEditMode.college && onCommitteeMemberDragStart('college', index)}
+                      onDragOver={(e) => committeeEditMode.college && e.preventDefault()}
+                      onDrop={() => committeeEditMode.college && onCommitteeMemberDrop('college', index)}
+                      onDragEnd={() => setDraggedCommitteeMember(null)}
+                      className={`text-xs text-slate-600 flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 transition-colors ${
+                        committeeEditMode.college ? 'cursor-move' : ''
+                      } ${
+                        committeeEditMode.college && draggedCommitteeMember?.committee === 'college' && draggedCommitteeMember.index === index
+                          ? 'border-emerald-400 bg-emerald-100/40'
+                          : 'border-slate-200 hover:border-emerald-300'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        {committeeEditMode.college && <GripVertical size={12} className="text-slate-400 flex-shrink-0" />}
+                        <span className="text-emerald-500 font-bold mt-0.5 flex-shrink-0">•</span>
+                        <span className="truncate">{member}</span>
+                      </span>
+                      {committeeEditMode.college && (
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            onClick={() => removeCommitteeMember('college', member)}
+                            className="px-2 py-0.5 rounded-md text-[11px] font-semibold border border-red-300 text-red-700 hover:bg-red-50 transition-colors"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {committeeEditMode.college && (
+                <div className="mt-3 pt-3 border-t border-slate-200">
+                  {!committeeAddOpen.college ? (
+                    <button
+                      onClick={() => setCommitteeAddOpen(prev => ({ ...prev, college: true }))}
+                      className="w-full px-3 py-2 rounded-lg text-xs font-semibold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition-colors"
+                    >
+                      + Add Member (Teaching / Non-Teaching)
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        value={committeeAddSearch.college}
+                        onChange={(e) => setCommitteeAddSearch(prev => ({ ...prev, college: e.target.value }))}
+                        placeholder="Search teaching/non-teaching member..."
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white/90"
+                      />
+                      <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-300 theme-panel">
+                        {committeeAddOptionsByCommittee.college
+                          .filter(option => option.label.toLowerCase().includes(committeeAddSearch.college.toLowerCase()))
+                          .map(option => (
+                            <button
+                              key={`c-add-${option.value}`}
+                              type="button"
+                              onClick={() => setCommitteeAddSelection(prev => ({ ...prev, college: option.value }))}
+                              className={`committee-add-option w-full text-left px-3 py-2 text-xs border-b border-slate-200 last:border-b-0 transition-colors ${
+                                committeeAddSelection.college === option.value
+                                  ? 'committee-add-option-selected-emerald text-emerald-700'
+                                  : 'text-slate-700'
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => addCommitteeMember('college')}
+                          disabled={!committeeAddSelection.college}
+                          className="px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Add
+                        </button>
+                        <button
+                          onClick={() => {
+                            setCommitteeAddOpen(prev => ({ ...prev, college: false }));
+                            setCommitteeAddSelection(prev => ({ ...prev, college: '' }));
+                            setCommitteeAddSearch(prev => ({ ...prev, college: '' }));
+                          }}
+                          className="px-3 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                )}
+              </div>
             </div>
-          </div>
+            <p className="text-xs text-slate-500 mt-3">{examCommittees.ntsNote}</p>
+          </section>
+
+          <section className="theme-card rounded-2xl p-6 border border-slate-200">
+            <h2 className="text-lg font-bold text-slate-900 mb-4">More Reference</h2>
+            <div className="space-y-3">
+              <div className="theme-panel rounded-lg border border-red-200/40">
+                <button
+                  onClick={() => setAboutSectionsOpen(prev => ({ ...prev, troubleshooting: !prev.troubleshooting }))}
+                  className="w-full px-4 py-3 text-left flex items-center justify-between"
+                >
+                  <span className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                    <AlertCircle size={16} className="text-red-600" />
+                    Troubleshooting
+                  </span>
+                  <ChevronDown
+                    size={16}
+                    className={`text-slate-500 transition-transform ${aboutSectionsOpen.troubleshooting ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                {aboutSectionsOpen.troubleshooting && (
+                  <div className="px-4 pb-4 space-y-3">
+                    {ABOUT_SECTIONS.troubleshooting.map((item, idx) => (
+                      <div key={idx} className="theme-panel rounded-lg p-3 border border-red-200/40">
+                        <p className="text-xs font-semibold text-slate-800 mb-1">{item.problem}</p>
+                        <p className="text-xs text-slate-600 leading-relaxed">{item.solution}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="theme-panel rounded-lg border border-slate-200">
+                <button
+                  onClick={() => setAboutSectionsOpen(prev => ({ ...prev, technical: !prev.technical }))}
+                  className="w-full px-4 py-3 text-left flex items-center justify-between"
+                >
+                  <span className="text-sm font-semibold text-slate-900">Technical Details</span>
+                  <ChevronDown
+                    size={16}
+                    className={`text-slate-500 transition-transform ${aboutSectionsOpen.technical ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                {aboutSectionsOpen.technical && (
+                  <div className="px-4 pb-4 space-y-3">
+                    <div><p className="text-xs font-semibold text-slate-700 mb-0.5">Data Storage</p><p className="text-xs text-slate-600">{ABOUT_SECTIONS.technicalDetails.storage}</p></div>
+                    <div><p className="text-xs font-semibold text-slate-700 mb-0.5">Browser Compatibility</p><p className="text-xs text-slate-600">{ABOUT_SECTIONS.technicalDetails.compatibility}</p></div>
+                    <div><p className="text-xs font-semibold text-slate-700 mb-0.5">Performance</p><p className="text-xs text-slate-600">{ABOUT_SECTIONS.technicalDetails.performance}</p></div>
+                    <div><p className="text-xs font-semibold text-slate-700 mb-0.5">Security & Privacy</p><p className="text-xs text-slate-600">{ABOUT_SECTIONS.technicalDetails.security}</p></div>
+                  </div>
+                )}
+              </div>
+
+              <div className="theme-panel rounded-lg border border-slate-200">
+                <button
+                  onClick={() => setAboutSectionsOpen(prev => ({ ...prev, glossary: !prev.glossary }))}
+                  className="w-full px-4 py-3 text-left flex items-center justify-between"
+                >
+                  <span className="text-sm font-semibold text-slate-900">Glossary</span>
+                  <ChevronDown
+                    size={16}
+                    className={`text-slate-500 transition-transform ${aboutSectionsOpen.glossary ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                {aboutSectionsOpen.glossary && (
+                  <div className="px-4 pb-4 space-y-2">
+                    {ABOUT_SECTIONS.glossary.map((item) => (
+                      <div key={item.term} className="theme-panel glossary-item rounded-lg p-3 border">
+                        <span className="glossary-term font-bold text-xs">{item.term}: </span>
+                        <span className="text-xs text-slate-700">{item.definition}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="theme-panel rounded-lg border border-slate-200">
+                <button
+                  onClick={() => setAboutSectionsOpen(prev => ({ ...prev, advanced: !prev.advanced }))}
+                  className="w-full px-4 py-3 text-left flex items-center justify-between"
+                >
+                  <span className="text-sm font-semibold text-slate-900">Advanced Features</span>
+                  <ChevronDown
+                    size={16}
+                    className={`text-slate-500 transition-transform ${aboutSectionsOpen.advanced ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                {aboutSectionsOpen.advanced && (
+                  <div className="px-4 pb-4 space-y-2">
+                    {ABOUT_SECTIONS.advancedFeatures.map((f) => (
+                      <div key={f.name} className="theme-panel rounded-lg p-3 border border-slate-200">
+                        <p className="text-xs font-semibold text-slate-800 mb-0.5">{f.name}</p>
+                        <p className="text-xs text-slate-600">{f.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
 
           {/* Footer */}
           <section className="theme-card rounded-2xl p-6 border border-slate-200 text-center">
